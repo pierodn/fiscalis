@@ -46,7 +46,8 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="ConvertionRates.cs" />
-    <Compile Include="QueryResult.cs" />
+    <Compile Include="TaxReport.cs" />
+    <Compile Include="FlexQueryResponse.cs" />
     <Compile Include="Program.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
   </ItemGroup>

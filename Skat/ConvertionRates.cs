@@ -3,24 +3,50 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.IO;
+using System.Diagnostics;
 
 namespace Nationalbanken
 {
+
     public class ConvertionRates
     {
         // https://nationalbanken.statbank.dk
         // => Exchange rates => Daily exchange rate => (USD, Exchange rates, dates) => Show table => Comma sep. (csv)
 
-        Dictionary<string, double> rates;
+        const decimal QuotationRate = 100.0M; 
 
-        public ConvertionRates(Dictionary<string, double> _rates)
+        Dictionary<string, decimal> rates;
+
+        public ConvertionRates(Dictionary<string, decimal> _rates)
         {
             rates = _rates;
         }
 
-        public static ConvertionRates Load(string path)
+        public decimal? GetRate(string dateStr)
         {
-            var dict = new Dictionary<string, double>();
+            const int MaxDaysBack = 9;
+
+            DateTime date = DateTime.Parse(dateStr);
+
+            for (int i = 0; i < MaxDaysBack; i++)
+            {
+                string key = date.ToString("yyyy-MM-dd");
+                decimal rate;
+                if (rates.TryGetValue(key, out rate))
+                {
+                    return rate;
+                }
+                date = date.AddDays(-1);
+            }
+
+            Trace.TraceError("Can't find the daily rate for " + dateStr);
+
+            return null;
+        }
+
+        public static ConvertionRates Import(string path)
+        {
+            var dictionary = new Dictionary<string, decimal>();
 
             using (var reader = new StreamReader(path))
             {
@@ -39,18 +65,18 @@ namespace Nationalbanken
                     string raw = dates[i].Trim('"');   // e.g. 2023M01D02
                     string formatted = ConvertDate(raw); // e.g. 2023-01-02
 
-                    double rate;
-                    if (double.TryParse(values[i],
+                    decimal rate;
+                    if (decimal.TryParse(values[i],
                         System.Globalization.NumberStyles.Any,
                         System.Globalization.CultureInfo.InvariantCulture,
                         out rate))
                     {
-                        dict[formatted] = rate;
+                        dictionary[formatted] = rate / QuotationRate;
                     }
                 }
             }
 
-            var convertionRates = new ConvertionRates(dict);
+            var convertionRates = new ConvertionRates(dictionary);
             return convertionRates;
         }
 
@@ -63,8 +89,6 @@ namespace Nationalbanken
 
             return year + "-" + month + "-" + day;
         }
-
-        // TODO double GetRate(string date)
     }
 
 }
