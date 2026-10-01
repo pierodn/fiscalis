@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO; // temp
+using System.Diagnostics;
 
 using Nationalbanken;
 using InteractiveBrokers;
@@ -12,7 +13,8 @@ namespace LedgerToTax
     {
         static void Main(string[] args)
         {
-            const string Depot = "C:\\Users\\Admin\\Downloads\\";
+            //const string Depot = "C:\\Users\\Admin\\Downloads\\";
+            const string Depot = "C:\\Users\\piero\\Downloads\\";
 
             var fxRates = ConvertionRates.Import(Depot + "nationalbanken_2023-2026-09-16.csv");
             var queryResponse = FlexQueryResponse.Import(Depot + "IBKR_2023_1709.csv");
@@ -45,32 +47,102 @@ namespace LedgerToTax
                - SELL triggers gain/loss and add up to totalGainLoss 
                  - Add a warning for the ETF MAG7
             */
-            var poolEvents = new List<PoolEvent>();
+
+            // ====================================
+            // Convert into dated events
+            // ====================================
+
+            var events = new List<Event>();
             
             foreach (var trade in queryResponse.trades)
             {
-                poolEvents.Add(PoolEvent.FromTrade(trade, fxRates));
+                events.Add(Event.FromTrade(trade, fxRates));
             }
             
             foreach (var transfer in queryResponse.transfers)
             {
-                poolEvents.Add(PoolEvent.FromTransfer(transfer, fxRates));
+                events.Add(Event.FromTransfer(transfer, fxRates));
             }
 
             foreach (var corporateAction in queryResponse.corporateActions)
             {
-                poolEvents.Add(PoolEvent.FromCorporateAction(corporateAction));
+                events.Add(Event.FromCorporateAction(corporateAction));
             }
 
             foreach (var cashTransaction in queryResponse.cashTransactions)
             {
                 // Interested only in ReturnOfCapital events
-                PoolEvent roc = PoolEvent.FromCashTransaction(cashTransaction, fxRates);
-                if (roc.type == PoolEventType.ReturnOfCapital)
+                Event roc = Event.FromCashTransaction(cashTransaction, fxRates);
+                if (roc.type == EventType.ReturnOfCapital)
                 {
-                    poolEvents.Add(roc);
+                    events.Add(roc);
                 }
             }
+
+
+            //
+            // Process events in order by date
+            //
+
+            events.Sort(delegate(Event a, Event b) { return a.dateTime.CompareTo(b.dateTime); });
+
+            TaxReport report = new TaxReport();
+            Dictionary<string, Position> positions = new Dictionary<string, Position>();
+
+
+            foreach (Event evt in events)
+            {
+                //Console.WriteLine(evento.dateTime);
+                Position position;
+                if (!positions.TryGetValue(evt.symbol, out position))
+                {
+                    position = new Position();
+                    position.symbol = evt.symbol;
+                    positions[evt.symbol] = position;
+                }
+
+                switch (evt.type)
+                {
+                    case EventType.Trade:
+                        if (evt.quantity > 0)
+                        {
+                            position.ApplyBuy(evt.quantity, evt.price);
+                        }
+                        else
+                        {
+                            decimal realizedGainLoss = position.ApplySell(-evt.quantity, evt.price);
+                            report.totalGainLoss += realizedGainLoss;
+                        }
+                        break;
+
+                    case EventType.Split:
+                        position.quantity += evt.quantity; // cost basis total unchanged
+                        break;
+
+                    case EventType.Transfer:
+                        //RecordRealizedGain(evt.Symbol, evt.AmountDkk - pos.CostBasisTotalDkk, evt.DateTime);
+                        pos.Quantity = 0m;
+                        pos.CostBasisTotalDkk = 0m;
+                        break;
+
+                    case EventType.ReturnOfCapital:
+                        Trace.Assert(false);
+                        /*
+                        if (evt.AmountDkk > pos.CostBasisTotalDkk)
+                        {
+                            RecordRealizedGain(evt.Symbol, evt.AmountDkk - pos.CostBasisTotalDkk, evt.DateTime);
+                            pos.CostBasisTotalDkk = 0m;
+                        }
+                        else
+                        {
+                            pos.CostBasisTotalDkk -= evt.AmountDkk;
+                        }*/
+                        break;
+
+                    
+                }
+            }
+
 
             return;
 

@@ -9,22 +9,6 @@ using Nationalbanken;
 
 namespace InteractiveBrokers
 {
-    public class PooledPosition
-    {
-        public string symbol;
-        public string isin;
-        public decimal quantity;
-        public decimal averageCostPerUnit;
-
-        public PooledPosition(string symbol, string isin, decimal quantity, decimal averageCostPerUnit)
-        {
-            this.symbol = symbol;
-            this.isin = isin;
-            this.quantity = quantity;
-            this.averageCostPerUnit = averageCostPerUnit;
-        }
-    }
-    
     public class TaxReport
     {
         public decimal totalGainLoss;       // Rubrik 454: Foreign Capital Gains/Losses (calculated in DKK)
@@ -33,12 +17,14 @@ namespace InteractiveBrokers
         public decimal interestReceived;    // Rubrik 431: Foreign interest income and other capital income.
         public decimal yearEndAccountValue; // Rubrik 490: Year-End Custody Account Value (from year-end prices)
         
-        public List<PooledPosition> yearEndPositions;
+        public List<Position> yearEndPositions;
     }
 
-    
+    // ========================================
+    // Events
+    // ========================================
 
-    public enum PoolEventType
+    public enum EventType
     {
         Trade,
         Split,
@@ -46,18 +32,18 @@ namespace InteractiveBrokers
         ReturnOfCapital
     }
 
-    public class PoolEvent
+    public class Event
     {
         public string symbol;
         public string isin;
         public string dateTime;
 
-        public PoolEventType type;
+        public EventType type;
 
         // Trade or Transfer or Split type
-        public decimal? quantity;   // signed for Trade (+buy/-sell); positive for transfers; extra shares for splits.
-        public decimal? price;      // per-unit price (trade price, or carried-over cost basis for transfers)
-        public decimal? commission; // Trade only
+        public decimal quantity;   // signed for Trade (+buy/-sell); positive for transfers; extra shares for splits.
+        public decimal price;      // per-unit price (trade price, or carried-over cost basis for transfers)
+        public decimal commission; // Trade only
 
         // Split only
         public decimal? splitRatio; // e.g. 2.0 for a 2-for-1 split   // TODO quantity ?
@@ -65,11 +51,11 @@ namespace InteractiveBrokers
         // ReturnOfCapital only
         public decimal? amount;     // total distribution amount      // TODO quantity?
 
-        private PoolEvent(
+        private Event(
             string symbol,
             string isin,
             string dateTime,
-            PoolEventType type,
+            EventType type,
             decimal? quantity,
             decimal? price,
             decimal? commission,
@@ -87,18 +73,18 @@ namespace InteractiveBrokers
             this.amount = amount;           // temp?
         }
 
-        public static PoolEvent FromTrade(Trade trade, ConvertionRates fxRates)
+        public static Event FromTrade(Trade trade, ConvertionRates fxRates)
         {
             Trace.Assert(trade.quantity != 0);
 
             decimal? dailyRate = fxRates.GetRate(trade.dateTime);
             Trace.Assert(dailyRate != null);  
 
-            return new PoolEvent(
+            return new Event(
                 trade.symbol,
                 trade.isin,
                 trade.dateTime, 
-                PoolEventType.Trade, 
+                EventType.Trade, 
                 dailyRate * trade.quantity,
                 trade.tradePrice,
                 trade.commission,
@@ -107,7 +93,7 @@ namespace InteractiveBrokers
         }
 
 
-        public static PoolEvent FromTransfer(Transfer transfer, ConvertionRates fxRates)
+        public static Event FromTransfer(Transfer transfer, ConvertionRates fxRates)
         {
             Trace.Assert(transfer.quantity != 0);
             Trace.Assert((transfer.type == "IN") && (transfer.quantity > 0) 
@@ -116,11 +102,11 @@ namespace InteractiveBrokers
             decimal? dailyRate = fxRates.GetRate(transfer.dateTime);
             Trace.Assert(dailyRate != null);
 
-            return new PoolEvent(
+            return new Event(
                 transfer.symbol,
                 transfer.isin,
                 transfer.dateTime,
-                PoolEventType.Transfer,
+                EventType.Transfer,
                 transfer.quantity,
                 dailyRate * transfer.costBasis / transfer.quantity,  // CostBasisPerUnit
                 transfer.transferPrice,                              // Commission is the transferPrice (usually zero).        
@@ -128,7 +114,7 @@ namespace InteractiveBrokers
                 null);                         // temp?
         }
 
-        public static PoolEvent FromCorporateAction(CorporateAction corporateAction)
+        public static Event FromCorporateAction(CorporateAction corporateAction)
         {
             Trace.Assert(corporateAction.quantity != 0);
             Trace.Assert(corporateAction.type == "FS"); // Only case managed, the Forward Split.
@@ -139,11 +125,11 @@ namespace InteractiveBrokers
             // TODO The corporateAction.description can be parsed to derive the split ratio.
             // TODO The split ration should match pre-split shares (
 
-            return new PoolEvent(
+            return new Event(
                 corporateAction.symbol,
                 corporateAction.isin,
                 corporateAction.dateTime,
-                PoolEventType.Split,
+                EventType.Split,
                 corporateAction.quantity, // The number of extra shares you get with this split.
                 0.0M, //dailyRate * transfer.costBasis / transfer.quantity,  // CostBasisPerUnit
                 0.0M, // transfer.transferPrice,                              // Commission is the transferPrice (usually zero).        
@@ -151,7 +137,7 @@ namespace InteractiveBrokers
                 null);                         // temp?
         }
 
-        public static PoolEvent FromCashTransaction(CashTransaction cashTransaction, ConvertionRates fxRates)
+        public static Event FromCashTransaction(CashTransaction cashTransaction, ConvertionRates fxRates)
         {
             /*
             Trace.Assert(cashTransaction.amount != 0);
@@ -173,11 +159,11 @@ namespace InteractiveBrokers
                 null);                         // temp?
              * */
 
-            return new PoolEvent(
+            return new Event(
                 cashTransaction.symbol,
                 cashTransaction.isin,
                 cashTransaction.dateTime,
-                PoolEventType.ReturnOfCapital,
+                EventType.ReturnOfCapital,
                 null, 
                 null, 
                 null,         

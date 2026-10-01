@@ -20,29 +20,55 @@ namespace InteractiveBrokers
         }
     }
 
-    public class OpenPosition
+    public class Position
     {
         public string symbol;
         public string isin;
         public decimal quantity;
-        //public decimal costBasisPrice; // per unit but it's FIFO (IBKR's default).
-        //public decimal openPrice; // average price per share
-        public decimal value; // current price ??
+        public decimal averageCostPerShare; // NOTE Not equivalent to the IBKR's FIFO, unless the position results from one single buy.
+        // TODO Remember to change manually this value that comes from the IBKR Flex Query.
+        //public decimal openPrice; 
+        //public decimal value; // current price ??
 
-        static public OpenPosition Parse(string line)
+        static public Position Parse(string line)
         {
             string[] elements = Utils.SplitRow(line);
 
-            var openPosition = new OpenPosition();
+            var position = new Position();
 
-            openPosition.symbol = Utils.Trim(elements[0]);
-            openPosition.isin = Utils.Trim(elements[1]);
-            openPosition.quantity = decimal.Parse(Utils.Trim(elements[2]));
-            //openPosition.costBasisPrice = decimal.Parse(Utils.Trim(elements[3]));
-            //openPosition.openPrice = decimal.Parse(Utils.Trim(elements[4]));
-            openPosition.value = decimal.Parse(Utils.Trim(elements[5]));
+            position.symbol = Utils.Trim(elements[0]);
+            position.isin = Utils.Trim(elements[1]);
+            position.quantity = decimal.Parse(Utils.Trim(elements[2]));
+            position.averageCostPerShare = decimal.Parse(Utils.Trim(elements[3]));
+            //position.openPrice = decimal.Parse(Utils.Trim(elements[4]));
+            //position.value = decimal.Parse(Utils.Trim(elements[5]));
 
-            return openPosition;
+            return position;
+        }
+
+        public void ApplyBuy(decimal buyQuantity, decimal tradePrice)
+        {
+            Trace.Assert(buyQuantity > 0);
+
+            decimal existingTotalCost = this.quantity * this.averageCostPerShare;
+            decimal newTotalCost = existingTotalCost + (buyQuantity * tradePrice);
+            decimal newQuantity = this.quantity + buyQuantity;
+
+            this.averageCostPerShare = newTotalCost / newQuantity;
+            this.quantity = newQuantity;
+        }
+
+        public decimal ApplySell(decimal sellQuantity, decimal tradePrice)
+        {
+            Trace.Assert(sellQuantity > 0);
+            Trace.Assert(sellQuantity > this.quantity);
+            
+            decimal realizedGainLoss = (tradePrice - this.averageCostPerShare) * sellQuantity;
+
+            this.quantity -= sellQuantity;
+            // AverageCostPerShare is unchanged — remaining shares keep the same cost basis
+
+            return realizedGainLoss;
         }
     }
 
@@ -55,7 +81,7 @@ namespace InteractiveBrokers
         public decimal quantity;
         public decimal tradePrice;
         public string currency;
-        public decimal proceeds; // TODO remove? It seems to be: quantity * tradePrice
+        //public decimal proceeds; // TODO remove? It seems to be: quantity * tradePrice
         public decimal commission;
         public string commissionCurrency;
 
@@ -72,7 +98,9 @@ namespace InteractiveBrokers
             trade.quantity = decimal.Parse(Utils.Trim(elements[4]));
             trade.tradePrice = decimal.Parse(Utils.Trim(elements[5]));
             trade.currency = Utils.Trim(elements[6]);
-            trade.proceeds = decimal.Parse(Utils.Trim(elements[7])); // TODO remove?
+            //trade.proceeds = decimal.Parse(Utils.Trim(elements[7])); // TODO remove?
+            decimal proceeds = decimal.Parse(Utils.Trim(elements[7]));
+            Trace.Assert(proceeds == trade.quantity * trade.tradePrice);
             trade.commission = decimal.Parse(Utils.Trim(elements[8]));
             trade.commissionCurrency = Utils.Trim(elements[9]);
 
@@ -168,20 +196,20 @@ namespace InteractiveBrokers
 
     public class FlexQueryResponse
     {
-        public List<OpenPosition> openPositions;
+        public List<Position> positions;
         public List<Trade> trades;
         public List<CorporateAction> corporateActions;
         public List<CashTransaction> cashTransactions;
         public List<Transfer> transfers;
 
         public FlexQueryResponse(
-            List<OpenPosition> openPositions,
+            List<Position> positions,
             List<Trade> trades,
             List<CorporateAction> corporateActions,
             List<CashTransaction> cashTransactions,
             List<Transfer> transfers)
         {
-            this.openPositions = openPositions;
+            this.positions = positions;
             this.trades = trades;
             this.corporateActions = corporateActions;
             this.cashTransactions = cashTransactions;
@@ -222,10 +250,10 @@ namespace InteractiveBrokers
             Trace.Assert(indexCashTransactionsSection > indexCorporateActionsSection);
             Trace.Assert(indexTransfersSection > indexCashTransactionsSection);
 
-            var openPositions = new List<OpenPosition>();
+            var positions = new List<Position>();
             for (int i = indexPositionsSection + 1; i < indexTradesSection; i++)
             {
-                openPositions.Add(OpenPosition.Parse(lines[i]));
+                positions.Add(Position.Parse(lines[i]));
             }
 
             var trades = new List<Trade>();
@@ -253,7 +281,7 @@ namespace InteractiveBrokers
             }
 
             return new FlexQueryResponse(
-                openPositions,
+                positions,
                 trades,
                 corporateActions,
                 cashTransactions,

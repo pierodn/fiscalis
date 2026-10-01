@@ -26,7 +26,7 @@ namespace Nationalbanken
         {
             const int MaxDaysBack = 9;
 
-            DateTime date = DateTime.Parse(dateStr);
+            DateTime date = DateTime.Parse(dateStr.Substring(0,10));
 
             for (int i = 0; i < MaxDaysBack; i++)
             {
