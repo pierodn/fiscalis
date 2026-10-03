@@ -46,6 +46,7 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="ConvertionRates.cs" />
+    <Compile Include="SoftAssert.cs" />
     <Compile Include="TaxReport.cs" />
     <Compile Include="FlexQueryResponse.cs" />
     <Compile Include="Program.cs" />

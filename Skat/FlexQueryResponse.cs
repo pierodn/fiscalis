@@ -4,6 +4,7 @@ using System.Linq;
 using System.Text;
 using System.IO;
 using System.Diagnostics;
+using MyDiagnostics;
 
 namespace InteractiveBrokers
 {
@@ -25,10 +26,8 @@ namespace InteractiveBrokers
         public string symbol;
         public string isin;
         public decimal quantity;
-        public decimal averageCostPerShare; // NOTE Not equivalent to the IBKR's FIFO, unless the position results from one single buy.
+        public decimal costBasisTotal; // gennemsnitsmetoden, not the IBKR's FIFO (unless the position results from a single buy).
         // TODO Remember to change manually this value that comes from the IBKR Flex Query.
-        //public decimal openPrice; 
-        //public decimal value; // current price ??
 
         static public Position Parse(string line)
         {
@@ -39,13 +38,18 @@ namespace InteractiveBrokers
             position.symbol = Utils.Trim(elements[0]);
             position.isin = Utils.Trim(elements[1]);
             position.quantity = decimal.Parse(Utils.Trim(elements[2]));
-            position.averageCostPerShare = decimal.Parse(Utils.Trim(elements[3]));
-            //position.openPrice = decimal.Parse(Utils.Trim(elements[4]));
-            //position.value = decimal.Parse(Utils.Trim(elements[5]));
+
+            decimal costBasisPrice = decimal.Parse(Utils.Trim(elements[3]));
+            decimal openPrice = decimal.Parse(Utils.Trim(elements[4])); // TODO maybe not needed
+            decimal positionValue = decimal.Parse(Utils.Trim(elements[5]));
+
+            position.costBasisTotal = costBasisPrice * position.quantity;
+            //Console.WriteLine(position.costBasisTotal == positionValue);
+            SoftAssert.Check(position.costBasisTotal == positionValue, "Assuming they are equal in the OpenPositions section");
 
             return position;
         }
-
+        /*
         public void ApplyBuy(decimal buyQuantity, decimal tradePrice)
         {
             Trace.Assert(buyQuantity > 0);
@@ -70,6 +74,7 @@ namespace InteractiveBrokers
 
             return realizedGainLoss;
         }
+         * */
     }
 
     public class Trade
@@ -81,7 +86,7 @@ namespace InteractiveBrokers
         public decimal quantity;
         public decimal tradePrice;
         public string currency;
-        //public decimal proceeds; // TODO remove? It seems to be: quantity * tradePrice
+        public decimal proceeds; // = quantity * tradePrice
         public decimal commission;
         public string commissionCurrency;
 
@@ -98,9 +103,7 @@ namespace InteractiveBrokers
             trade.quantity = decimal.Parse(Utils.Trim(elements[4]));
             trade.tradePrice = decimal.Parse(Utils.Trim(elements[5]));
             trade.currency = Utils.Trim(elements[6]);
-            //trade.proceeds = decimal.Parse(Utils.Trim(elements[7])); // TODO remove?
-            decimal proceeds = decimal.Parse(Utils.Trim(elements[7]));
-            Trace.Assert(proceeds == trade.quantity * trade.tradePrice);
+            trade.proceeds = decimal.Parse(Utils.Trim(elements[7]));
             trade.commission = decimal.Parse(Utils.Trim(elements[8]));
             trade.commissionCurrency = Utils.Trim(elements[9]);
 
