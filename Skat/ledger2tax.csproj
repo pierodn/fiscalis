@@ -45,7 +45,7 @@
     <Reference Include="System.Xml" />
   </ItemGroup>
   <ItemGroup>
-    <Compile Include="ConvertionRates.cs" />
+    <Compile Include="FxRates.cs" />
     <Compile Include="SoftAssert.cs" />
     <Compile Include="TaxReport.cs" />
     <Compile Include="FlexQueryResponse.cs" />

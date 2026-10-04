@@ -16,13 +16,12 @@ namespace MyDiagnostics
 
                 string fileName = frame != null ? frame.GetFileName() : "Unknown File";
                 int lineNumber = frame != null ? frame.GetFileLineNumber() : 0;
-                var method = frame != null ? frame.GetMethod() : null;
-                string methodName = method != null ? method.DeclaringType.FullName + "." + method.Name : "Unknown Method";
+                fileName = fileName.Substring(fileName.LastIndexOf('\\') + 1);
+                
+                //var method = frame != null ? frame.GetMethod() : null;
+                //string methodName = method != null ? method.DeclaringType.FullName + "." + method.Name : "Unknown Method";
 
-                // Output to standard output (or Trace)
-                Console.WriteLine("[SOFT ASSERT FAILED] {0}", message);
-                Console.WriteLine("  -> at {0}", methodName);
-                Console.WriteLine("  -> in {0}:line {1}", fileName, lineNumber);
+                Console.WriteLine("[ASSERT FAILED] in {0}:{1} => {2}", fileName, lineNumber, message);
             }
         }
     }

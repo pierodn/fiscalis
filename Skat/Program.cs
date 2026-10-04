@@ -16,7 +16,7 @@ namespace LedgerToTax
             //const string Depot = "C:\\Users\\Admin\\Downloads\\";
             const string Depot = "C:\\Users\\Admin\\Downloads\\";
 
-            var fxRates = ConvertionRates.Import(Depot + "nationalbanken_2023-2026-09-16.csv");
+            var fxRates = FxRates.Import(Depot + "nationalbanken_2023-2026-09-16.csv");
             var queryResponse = FlexQueryResponse.Import(Depot + "IBKR_2023_1709.csv");
             //var queryResultPreviousYear = QueryResult.Load(Depot + "IBKR_2022.csv");
 
@@ -75,12 +75,12 @@ namespace LedgerToTax
                         if (evt.quantity > 0)
                         {
                             position.quantity += evt.quantity;
-                            position.costBasisTotal += evt.amount;
+                            position.costBasisTotal += -evt.amount; // TODO ask Claude to come back to ABS(amount)
                         }
                         else
                         {
                             decimal averageCost = position.quantity == 0 ? 0m : position.costBasisTotal / position.quantity;
-                            decimal soldQuantity = -evt.quantity;
+                            decimal soldQuantity = -evt.quantity; 
                             decimal costOfSold = averageCost * soldQuantity;
                             decimal realizedGain = evt.amount - costOfSold;
 
@@ -142,12 +142,18 @@ namespace LedgerToTax
                 }
             }
 
+
+            decimal approxDKKtoUSDrate = 0.15m;
+
             Console.WriteLine();
-            Console.WriteLine("totalGainLoss        (Rubrik 454): {0}", report.totalGainLoss);
-            Console.WriteLine("totalDividends       (Rubrik 452): {0}", report.totalDividends);
-            Console.WriteLine("totalWithholdingTax  (Rubrik 496): {0}", report.totalWithholdingTax);
-            Console.WriteLine("interestReceived     (Rubrik 431): {0}", report.interestReceived);
-            Console.WriteLine("yearEndAccountValue  (Rubrik 490): {0}", report.yearEndAccountValue);
+            Console.WriteLine("totalGainLoss        (Rubrik 454): {0:F2} (USD {1:F2})", report.totalGainLoss, approxDKKtoUSDrate * report.totalGainLoss);
+            Console.WriteLine("totalDividends       (Rubrik 452): {0:F2} (USD {1:F2})", report.totalDividends, approxDKKtoUSDrate * report.totalDividends);
+            Console.WriteLine("totalWithholdingTax  (Rubrik 496): {0:F2} (USD {1:F2})", report.totalWithholdingTax, approxDKKtoUSDrate * report.totalWithholdingTax);
+            Console.WriteLine("interestReceived     (Rubrik 431): {0:F2} (USD {1:F2})", report.interestReceived, approxDKKtoUSDrate * report.interestReceived);
+            Console.WriteLine("yearEndAccountValue  (Rubrik 490): {0:F2} (USD {1:F2})", report.yearEndAccountValue, approxDKKtoUSDrate * report.yearEndAccountValue);
+            Console.ReadLine();
+            Console.WriteLine("NOTE: the amounts in USD are approximations for comparison with the broker report.");
+
             Console.ReadLine();
 
 

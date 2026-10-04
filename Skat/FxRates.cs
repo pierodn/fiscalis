@@ -8,7 +8,7 @@ using System.Diagnostics;
 namespace Nationalbanken
 {
 
-    public class ConvertionRates
+    public class FxRates
     {
         // https://nationalbanken.statbank.dk
         // => Exchange rates => Daily exchange rate => (USD, Exchange rates, dates) => Show table => Comma sep. (csv)
@@ -17,7 +17,7 @@ namespace Nationalbanken
 
         Dictionary<string, decimal> rates;
 
-        public ConvertionRates(Dictionary<string, decimal> _rates)
+        public FxRates(Dictionary<string, decimal> _rates)
         {
             rates = _rates;
         }
@@ -44,7 +44,7 @@ namespace Nationalbanken
             return null;
         }
 
-        public static ConvertionRates Import(string path)
+        public static FxRates Import(string path)
         {
             var dictionary = new Dictionary<string, decimal>();
 
@@ -76,7 +76,7 @@ namespace Nationalbanken
                 }
             }
 
-            var convertionRates = new ConvertionRates(dictionary);
+            var convertionRates = new FxRates(dictionary);
             return convertionRates;
         }
 

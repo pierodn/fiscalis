@@ -66,7 +66,7 @@ namespace InteractiveBrokers
         public decimal price;      // per-unit price (trade price, or carried-over cost basis for transfers)
         public decimal commission; // Trade only
         public decimal amount;     // total distribution amount (also ReturnOfCapital)
-        public decimal splitRatio; // e.g. 2.0 for a 2-for-1 split   // TODO quantity ?
+        public decimal splitRatio; // e.g. 2.0 for a 2-for-1 split   // It's in quantity. TODO remove ?
 
         private Event()
         {
@@ -79,9 +79,9 @@ namespace InteractiveBrokers
             EventType type,
             decimal quantity,
             decimal price,
-            decimal commission,
+            decimal commission, // TODO remove ?
             decimal amount,
-            decimal splitRatio    // temp?
+            decimal splitRatio  // TODO remove ?
             ) 
         {
             this.symbol = symbol;
@@ -90,21 +90,25 @@ namespace InteractiveBrokers
             this.type = type;
             this.quantity = quantity;
             this.price = price;
-            this.commission = commission;
-            this.amount = amount;  
-            this.splitRatio = splitRatio;   // temp?
+            this.commission = commission; // TODO remove ?
+            this.amount = amount;
+            this.splitRatio = splitRatio; // TODO remove ?
         }
 
-        public static Event FromTrade(Trade trade, ConvertionRates fxRates)
+        public static Event FromTrade(Trade trade, FxRates fxRates)
         {
             Trace.Assert(trade.quantity != 0);
             //SoftAssert.Check( Math.Abs( Math.Abs(trade.proceeds) - trade.quantity * trade.tradePrice < 0.01m), "Assuming they are equal");
-            Trace.Assert(trade.buySell.Equals("BUY") && (trade.quantity > 0) && (trade.proceeds < 0)
-                      || trade.buySell.Equals("SELL") && (trade.quantity < 0) && (trade.proceeds > 0));
+            Trace.Assert((trade.buySell.ToUpperInvariant() == "BUY") && (trade.quantity > 0) && (trade.proceeds < 0)
+                      || (trade.buySell.ToUpperInvariant() == "SELL") && (trade.quantity < 0) && (trade.proceeds > 0));
 
             decimal? dailyRatefound = fxRates.GetRate(trade.dateTime);
             Trace.Assert(dailyRatefound != null);
             decimal dailyRate = dailyRatefound.GetValueOrDefault();
+
+            decimal proceeds = dailyRate * trade.proceeds;
+            decimal commission = dailyRate * trade.commission;
+            decimal netCashFlow = proceeds + commission; // negative = cash out (buy), positive = cash in (sell)
 
             return new Event(
                 trade.symbol,
@@ -113,12 +117,12 @@ namespace InteractiveBrokers
                 EventType.Trade, 
                 trade.quantity,
                 dailyRate * trade.tradePrice,
-                dailyRate * trade.commission,
-                0.0m,  // amount
+                dailyRate * trade.commission, // TODO remove ?
+                netCashFlow,  // amount
                 0.0m); // splitRatio
         }
 
-        public static Event FromTransfer(Transfer transfer, ConvertionRates fxRates)
+        public static Event FromTransfer(Transfer transfer, FxRates fxRates)
         {
             Trace.Assert(transfer.quantity != 0);
             Trace.Assert((transfer.type == "IN") && (transfer.quantity > 0) 
@@ -140,7 +144,7 @@ namespace InteractiveBrokers
                 0.0m);                                               // no splitRatio
         }
 
-        public static Event FromCorporateAction(CorporateAction corporateAction, ConvertionRates fxRates)
+        public static Event FromCorporateAction(CorporateAction corporateAction, FxRates fxRates)
         {
             Trace.Assert(corporateAction.quantity != 0);
 /*
@@ -187,7 +191,7 @@ namespace InteractiveBrokers
             return evt;                         // temp?
         }
 
-        public static Event FromCashTransaction(CashTransaction cashTransaction, ConvertionRates fxRates)
+        public static Event FromCashTransaction(CashTransaction cashTransaction, FxRates fxRates)
         {
             Trace.Assert(cashTransaction.amount != 0);
 
@@ -228,13 +232,54 @@ namespace InteractiveBrokers
 
         public override string ToString()
         {
-            string s = dateTime.Substring(0, 10) + " " + symbol.PadRight(5) + Enum.GetName(typeof(EventType), type).PadRight(16);
-            s += (type == EventType.Trade) ? (((quantity > 0) ? " " : "") + quantity + " * " + price).PadRight(20) :
-                (type == EventType.Split) ? (" "+quantity).PadRight(20) : "".PadRight(20);
-            s += " amount=" + amount;
-            s += " commission=" + commission;
-            s += " splitRatio=" + splitRatio;
-            return s;  
+            string dateColumn = dateTime;
+            string symbolColumn = symbol;
+            string eventTypeColumn = "";
+            string qtyByPriceColumn = "";
+            string detailsColumn = "";
+
+            switch (type)
+            {
+                case EventType.Trade:
+                    eventTypeColumn = "Trade " + (quantity > 0 ? "(BUY)" : "(SELL)");
+                    qtyByPriceColumn = (quantity > 0 ? " " : "") + quantity + " * " + price;
+                    detailsColumn = "Amount=" + amount + " Commission=" + commission;
+                    break;
+                case EventType.Split:
+                    eventTypeColumn = "Split";
+                    detailsColumn = "1-to-" + quantity;
+                    break;
+                case EventType.Transfer:
+                    eventTypeColumn = "Transfer";
+                    qtyByPriceColumn = quantity + "";
+                    detailsColumn = "Amount=" + amount + " (costBasis including commission " + commission + ")";
+                    break;
+                case EventType.ReturnOfCapital:
+                    eventTypeColumn = "Return Of Capital";
+                    detailsColumn = "Amount=" + amount;
+                    break;
+                case EventType.Dividends:
+                    eventTypeColumn = "Dividends";
+                    detailsColumn = "Amount=" + amount;
+                    break;
+                case EventType.WithholdingTax:
+                    eventTypeColumn = "Tax";
+                    detailsColumn = "Amount=" + amount;
+                    break;
+                default:
+                    Trace.TraceError("Unhandled event type: " + Enum.GetName(typeof(EventType), type));
+                    break;
+            }
+
+
+            string line = 
+                dateColumn.PadRight(18) + 
+                symbolColumn.PadRight(6) +
+                eventTypeColumn.PadRight(16) + 
+                qtyByPriceColumn.PadRight(20) +
+                detailsColumn;
+
+           return line;
         }
        
     }
