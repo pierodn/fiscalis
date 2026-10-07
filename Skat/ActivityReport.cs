@@ -3,8 +3,10 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.IO;
+using System.Globalization;
 using System.Diagnostics;
 using MyDiagnostics;
+
 
 namespace InteractiveBrokers
 {
@@ -24,7 +26,6 @@ namespace InteractiveBrokers
     public class Position
     {
         public string symbol;
-        public string isin;
         public decimal quantity;
         public decimal costBasisTotal; // gennemsnitsmetoden, not the IBKR's FIFO (unless the position results from a single buy).
         // TODO Remember to change manually this value that comes from the IBKR Flex Query.
@@ -36,7 +37,6 @@ namespace InteractiveBrokers
             var position = new Position();
 
             position.symbol = Utils.Trim(elements[0]);
-            position.isin = Utils.Trim(elements[1]);
             position.quantity = decimal.Parse(Utils.Trim(elements[2]));
 
             decimal costBasisPrice = decimal.Parse(Utils.Trim(elements[3]));
@@ -45,42 +45,23 @@ namespace InteractiveBrokers
 
             position.costBasisTotal = costBasisPrice * position.quantity;
             //Console.WriteLine(position.costBasisTotal == positionValue);
-            SoftAssert.Check(position.costBasisTotal == positionValue, "Assuming they are equal in the OpenPositions section");
+            Precondition.Check(position.costBasisTotal == positionValue, "Assuming they are equal in the OpenPositions section");
 
             return position;
         }
-        /*
-        public void ApplyBuy(decimal buyQuantity, decimal tradePrice)
+
+        // TODO void ApplyBuy(decimal buyQuantity, decimal tradePrice)
+        // TODO decimal ApplySell(decimal sellQuantity, decimal tradePrice)
+
+        public override string ToString()
         {
-            Trace.Assert(buyQuantity > 0);
-
-            decimal existingTotalCost = this.quantity * this.averageCostPerShare;
-            decimal newTotalCost = existingTotalCost + (buyQuantity * tradePrice);
-            decimal newQuantity = this.quantity + buyQuantity;
-
-            this.averageCostPerShare = newTotalCost / newQuantity;
-            this.quantity = newQuantity;
+            return symbol + " " + quantity + " " + costBasisTotal.ToString("F2", CultureInfo.InvariantCulture);
         }
-
-        public decimal ApplySell(decimal sellQuantity, decimal tradePrice)
-        {
-            Trace.Assert(sellQuantity > 0);
-            Trace.Assert(sellQuantity > this.quantity);
-            
-            decimal realizedGainLoss = (tradePrice - this.averageCostPerShare) * sellQuantity;
-
-            this.quantity -= sellQuantity;
-            // AverageCostPerShare is unchanged — remaining shares keep the same cost basis
-
-            return realizedGainLoss;
-        }
-         * */
     }
 
     public class Trade
     {
         public string symbol;
-        public string isin;
         public string dateTime;
         public string buySell; // removeable as it is in the sign of quantity
         public decimal quantity;
@@ -97,7 +78,6 @@ namespace InteractiveBrokers
             var trade = new Trade();
 
             trade.symbol = Utils.Trim(elements[0]);
-            trade.isin = Utils.Trim(elements[1]);
             trade.dateTime = Utils.Trim(elements[2]);
             trade.buySell = Utils.Trim(elements[3]);
             trade.quantity = decimal.Parse(Utils.Trim(elements[4]));
@@ -114,7 +94,6 @@ namespace InteractiveBrokers
     public class CorporateAction
     {
         public string symbol;
-        public string isin;
         public string dateTime;
         public string type; // "FS" stands for SPLIT. See description
         public string description;
@@ -127,7 +106,6 @@ namespace InteractiveBrokers
             var corporateAction = new CorporateAction();
 
             corporateAction.symbol = Utils.Trim(elements[0]);
-            corporateAction.isin = Utils.Trim(elements[1]);
             corporateAction.dateTime = Utils.Trim(elements[2]);
             corporateAction.type = Utils.Trim(elements[3]);
             corporateAction.description = Utils.Trim(elements[4]);
@@ -140,7 +118,6 @@ namespace InteractiveBrokers
     public class CashTransaction
     {
         public string symbol;
-        public string isin;
         public string dateTime;
         public string type; // "Withholding Tax", "Dividends", "Payment In Lieu Of Dividends"
         public decimal amount;
@@ -154,7 +131,6 @@ namespace InteractiveBrokers
             var cashTransaction = new CashTransaction();
 
             cashTransaction.symbol = Utils.Trim(elements[0]);
-            cashTransaction.isin = Utils.Trim(elements[1]);
             cashTransaction.dateTime = Utils.Trim(elements[2]);
             cashTransaction.type = Utils.Trim(elements[3]);
             cashTransaction.amount = decimal.Parse(Utils.Trim(elements[4]));
@@ -168,7 +144,6 @@ namespace InteractiveBrokers
     public class Transfer
     {
         public string symbol;
-        public string isin;
         public string dateTime;
         public string type; // "ACATS"
         public decimal quantity;
@@ -184,7 +159,6 @@ namespace InteractiveBrokers
             var transfer = new Transfer();
 
             transfer.symbol = Utils.Trim(elements[0]);
-            transfer.isin = Utils.Trim(elements[1]);
             transfer.dateTime = Utils.Trim(elements[2]);
             transfer.type = Utils.Trim(elements[3]); // TEMP???
             transfer.quantity = decimal.Parse(Utils.Trim(elements[4]));
@@ -197,29 +171,30 @@ namespace InteractiveBrokers
         }
     }
 
-    public class FlexQueryResponse
+    public class ActivityReport
     {
-        public List<Position> positions;
+        public List<Position> openPositions;
         public List<Trade> trades;
         public List<CorporateAction> corporateActions;
         public List<CashTransaction> cashTransactions;
         public List<Transfer> transfers;
+        // TODO List<DepositWithdrawal> DepositsWithdrawals;
 
-        public FlexQueryResponse(
-            List<Position> positions,
+        public ActivityReport(
+            List<Position> openPositions,
             List<Trade> trades,
             List<CorporateAction> corporateActions,
             List<CashTransaction> cashTransactions,
             List<Transfer> transfers)
         {
-            this.positions = positions;
+            this.openPositions = openPositions;
             this.trades = trades;
             this.corporateActions = corporateActions;
             this.cashTransactions = cashTransactions;
             this.transfers = transfers;
         }
 
-        public static FlexQueryResponse Import(string filePath)
+        public static ActivityReport Import(string filePath)
         {
             // TODO maybe the FIFO CostBasisPrice for reference, but can get rid of OpenPrice, PositionValue.
             const string PositionsSectionHeader = "\"Symbol\",\"ISIN\",\"Quantity\",\"CostBasisPrice\",\"OpenPrice\",\"PositionValue\"";
@@ -283,7 +258,7 @@ namespace InteractiveBrokers
                 transfers.Add(Transfer.Parse(lines[i]));
             }
 
-            return new FlexQueryResponse(
+            return new ActivityReport(
                 positions,
                 trades,
                 corporateActions,

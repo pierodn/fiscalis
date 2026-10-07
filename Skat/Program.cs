@@ -6,6 +6,7 @@ using System.Diagnostics;
 
 using Nationalbanken;
 using InteractiveBrokers;
+using MyDiagnostics;
 
 namespace LedgerToTax
 {
@@ -13,12 +14,15 @@ namespace LedgerToTax
     {
         static void Main(string[] args)
         {
-            //const string Depot = "C:\\Users\\Admin\\Downloads\\";
+            // ====================================
+            // Input
+            // ====================================
+
             const string Depot = "C:\\Users\\Admin\\Downloads\\";
 
             var fxRates = FxRates.Import(Depot + "nationalbanken_2023-2026-09-16.csv");
-            var queryResponse = FlexQueryResponse.Import(Depot + "IBKR_2023_1709.csv");
-            //var queryResultPreviousYear = QueryResult.Load(Depot + "IBKR_2022.csv");
+            var previousActivityReport = ActivityReport.Import(Depot + "IBKR_2022_Schwab.csv");
+            var currentActivityReport = ActivityReport.Import(Depot + "IBKR_2023_1709.csv");
 
 
             // ====================================
@@ -27,39 +31,60 @@ namespace LedgerToTax
 
             var events = new List<Event>();
             
-            foreach (var trade in queryResponse.trades)
+            foreach (var trade in currentActivityReport.trades)
             {
                 events.Add(Event.FromTrade(trade, fxRates));
             }
             
-            foreach (var transfer in queryResponse.transfers)
+            foreach (var transfer in currentActivityReport.transfers)
             {
                 events.Add(Event.FromTransfer(transfer, fxRates));
             }
 
-            foreach (var corporateAction in queryResponse.corporateActions)
+            foreach (var corporateAction in currentActivityReport.corporateActions)
             {
                 events.Add(Event.FromCorporateAction(corporateAction, fxRates));
             }
 
-            foreach (var cashTransaction in queryResponse.cashTransactions)
+            foreach (var cashTransaction in currentActivityReport.cashTransactions)
             {
                 events.Add(Event.FromCashTransaction(cashTransaction, fxRates));
             }
 
+            // TODO: Deposits & Withdrawals
+            // TODO: Interest
+
             Console.WriteLine();
+            Console.WriteLine("Start Period Positions");
+            Console.WriteLine("======================");
 
             //
             // Process events in order by date
             //
 
-            TaxReport report = new TaxReport();
+            TaxReport report = new TaxReport(previousActivityReport.openPositions);
+
+            Console.WriteLine();
+            Console.WriteLine("Pooling events");
+            Console.WriteLine("==============");
 
             events.Sort(delegate(Event a, Event b) { return a.dateTime.CompareTo(b.dateTime); });
 
             foreach (Event evt in events)
             {
                 Console.WriteLine(evt);
+
+                if (evt.type == EventType.WithholdingTax)
+                {
+                    report.totalWithholdingTax += evt.amount;
+                    continue; 
+                }
+                else if (evt.type == EventType.Dividends)
+                {
+                    report.totalDividends += evt.amount;
+                    continue;
+                }
+                        
 
                 Position position;
                 if (!report.positions.TryGetValue(evt.symbol, out position))
@@ -79,6 +104,8 @@ namespace LedgerToTax
                         }
                         else
                         {
+                            Precondition.Check(position.quantity > 0);
+
                             decimal averageCost = position.quantity == 0 ? 0m : position.costBasisTotal / position.quantity;
                             decimal soldQuantity = -evt.quantity; 
                             decimal costOfSold = averageCost * soldQuantity;
@@ -90,10 +117,16 @@ namespace LedgerToTax
 
                             position.quantity += evt.quantity;
                             position.costBasisTotal -= costOfSold;
+
+                            if (position.quantity < 1)
+                            {
+                                report.positions.Remove(evt.symbol);
+                            }
                         }
                         break;
 
                     case EventType.Split:
+                        Precondition.Check(position.quantity > 0);
                         position.quantity += evt.quantity; // cost basis total unchanged
                         break;
 
@@ -105,16 +138,24 @@ namespace LedgerToTax
                         }
                         else
                         {
+                            Precondition.Check(position.quantity > 0);
+
                             decimal avgCost = position.quantity == 0 ? 0m : position.costBasisTotal / position.quantity;
                             decimal xferQty = -evt.quantity;
                             decimal costOfTransfer = avgCost * xferQty;
 
                             position.quantity += evt.quantity;
                             position.costBasisTotal -= costOfTransfer;
+
+                            if (position.quantity < 1)
+                            {
+                                report.positions.Remove(evt.symbol);
+                            }
                         }
                         break;
 
                     case EventType.ReturnOfCapital:
+                        Precondition.Check(position.quantity > 0);
                         if (evt.amount > position.costBasisTotal) // The company handing you back a piece of your own original investment, not profit;
                         {
                             decimal realizedGain = evt.amount - position.costBasisTotal;
@@ -130,15 +171,6 @@ namespace LedgerToTax
                             position.costBasisTotal -= evt.amount;
                         }
                         break;
-
-                    case EventType.Dividends:
-                        report.totalDividends += evt.amount;
-                        break;
-
-                    case EventType.WithholdingTax:
-                        report.totalWithholdingTax += evt.amount;
-                        break;
-                    
                 }
             }
 
@@ -146,19 +178,22 @@ namespace LedgerToTax
             decimal approxDKKtoUSDrate = 0.15m;
 
             Console.WriteLine();
+            Console.WriteLine("Tax Report");
+            Console.WriteLine("==========");
             Console.WriteLine("totalGainLoss        (Rubrik 454): {0:F2} (USD {1:F2})", report.totalGainLoss, approxDKKtoUSDrate * report.totalGainLoss);
             Console.WriteLine("totalDividends       (Rubrik 452): {0:F2} (USD {1:F2})", report.totalDividends, approxDKKtoUSDrate * report.totalDividends);
             Console.WriteLine("totalWithholdingTax  (Rubrik 496): {0:F2} (USD {1:F2})", report.totalWithholdingTax, approxDKKtoUSDrate * report.totalWithholdingTax);
             Console.WriteLine("interestReceived     (Rubrik 431): {0:F2} (USD {1:F2})", report.interestReceived, approxDKKtoUSDrate * report.interestReceived);
             Console.WriteLine("yearEndAccountValue  (Rubrik 490): {0:F2} (USD {1:F2})", report.yearEndAccountValue, approxDKKtoUSDrate * report.yearEndAccountValue);
+
+            Console.WriteLine();
+            Console.WriteLine("End Period Positions");
+            Console.WriteLine("====================");
+            report.WritePositions();
+
+
+            // Press Enter
             Console.ReadLine();
-            Console.WriteLine("NOTE: the amounts in USD are approximations for comparison with the broker report.");
-
-            Console.ReadLine();
-
-
-
-
 
 
             /*

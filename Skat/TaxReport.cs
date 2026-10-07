@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.IO;
+using System.Globalization;
 using System.Diagnostics;
 
 using MyDiagnostics;
@@ -33,11 +34,38 @@ namespace InteractiveBrokers
         public decimal interestReceived;    // Rubrik 431: Foreign interest income and other capital income.
         public decimal yearEndAccountValue; // Rubrik 490: Year-End Custody Account Value (from year-end prices)
 
+        public Dictionary<string, Position> positions = new Dictionary<string, Position>();
+
         // For inspection
         public List<RealizedGain> realizedGains = new List<RealizedGain>();
 
-        // for testing
-        public Dictionary<string, Position> positions = new Dictionary<string, Position>();
+        public TaxReport(List<Position> openPositions)
+        {
+            positions = openPositions.ToDictionary(p => p.symbol);
+        }
+
+        public void WritePositions()
+        {
+            WritePositions(Console.Out);
+        }
+
+        public void WritePositions(TextWriter writer)
+        {
+            TextWriter original = Console.Out;
+            Console.SetOut(writer);
+
+            List<string> keys = new List<string>(this.positions.Keys);
+            keys.Sort(StringComparer.Ordinal);
+            foreach (string key in keys)
+            {
+                string symbol = this.positions[key].symbol.PadRight(8);
+                string quantity = this.positions[key].quantity.ToString().PadRight(8);
+                string costBasisTotal = this.positions[key].costBasisTotal.ToString("F2", CultureInfo.InvariantCulture);
+                Console.WriteLine(string.Format("{0} {1} {2}", symbol, quantity, costBasisTotal));
+            }
+
+            Console.SetOut(original); // restore
+        }
     }
 
     // ========================================
@@ -74,7 +102,6 @@ namespace InteractiveBrokers
 
         private Event(
             string symbol,
-            string isin,
             string dateTime,
             EventType type,
             decimal quantity,
@@ -85,7 +112,6 @@ namespace InteractiveBrokers
             ) 
         {
             this.symbol = symbol;
-            this.isin = isin;
             this.dateTime = dateTime;
             this.type = type;
             this.quantity = quantity;
@@ -98,7 +124,7 @@ namespace InteractiveBrokers
         public static Event FromTrade(Trade trade, FxRates fxRates)
         {
             Trace.Assert(trade.quantity != 0);
-            //SoftAssert.Check( Math.Abs( Math.Abs(trade.proceeds) - trade.quantity * trade.tradePrice < 0.01m), "Assuming they are equal");
+            //Precondition.Check( Math.Abs( Math.Abs(trade.proceeds) - trade.quantity * trade.tradePrice < 0.01m), "Assuming they are equal");
             Trace.Assert((trade.buySell.ToUpperInvariant() == "BUY") && (trade.quantity > 0) && (trade.proceeds < 0)
                       || (trade.buySell.ToUpperInvariant() == "SELL") && (trade.quantity < 0) && (trade.proceeds > 0));
 
@@ -112,7 +138,6 @@ namespace InteractiveBrokers
 
             return new Event(
                 trade.symbol,
-                trade.isin,
                 trade.dateTime, 
                 EventType.Trade, 
                 trade.quantity,
@@ -134,7 +159,6 @@ namespace InteractiveBrokers
 
             return new Event(
                 transfer.symbol,
-                transfer.isin,
                 transfer.dateTime,
                 EventType.Transfer,
                 transfer.quantity,
@@ -154,7 +178,6 @@ namespace InteractiveBrokers
             */
             Event evt = new Event();
             evt.symbol = corporateAction.symbol;
-            evt.isin = corporateAction.isin;
             evt.dateTime = corporateAction.dateTime;
 
             switch (corporateAction.type)
@@ -201,7 +224,6 @@ namespace InteractiveBrokers
 
             Event evt = new Event();
             evt.symbol = cashTransaction.symbol;
-            evt.isin = cashTransaction.isin;
             evt.dateTime = cashTransaction.dateTime;
 
             string t = (cashTransaction.type ?? "").Trim().ToLowerInvariant();
@@ -241,29 +263,29 @@ namespace InteractiveBrokers
             switch (type)
             {
                 case EventType.Trade:
-                    eventTypeColumn = "Trade " + (quantity > 0 ? "(BUY)" : "(SELL)");
+                    eventTypeColumn = (quantity > 0 ? "BUY" : "SELL");
                     qtyByPriceColumn = (quantity > 0 ? " " : "") + quantity + " * " + price;
                     detailsColumn = "Amount=" + amount + " Commission=" + commission;
                     break;
                 case EventType.Split:
-                    eventTypeColumn = "Split";
-                    detailsColumn = "1-to-" + quantity;
+                    eventTypeColumn = "<Split>";
+                    detailsColumn = "Getting " + quantity;
                     break;
                 case EventType.Transfer:
-                    eventTypeColumn = "Transfer";
+                    eventTypeColumn = "<Transfer>";
                     qtyByPriceColumn = quantity + "";
                     detailsColumn = "Amount=" + amount + " (costBasis including commission " + commission + ")";
                     break;
                 case EventType.ReturnOfCapital:
-                    eventTypeColumn = "Return Of Capital";
+                    eventTypeColumn = "<Return Of Capital>";
                     detailsColumn = "Amount=" + amount;
                     break;
                 case EventType.Dividends:
-                    eventTypeColumn = "Dividends";
+                    eventTypeColumn = "(dividends)";
                     detailsColumn = "Amount=" + amount;
                     break;
                 case EventType.WithholdingTax:
-                    eventTypeColumn = "Tax";
+                    eventTypeColumn = "(withholding tax)";
                     detailsColumn = "Amount=" + amount;
                     break;
                 default:
@@ -273,9 +295,9 @@ namespace InteractiveBrokers
 
 
             string line = 
-                dateColumn.PadRight(18) + 
+                dateColumn.PadRight(20) + 
                 symbolColumn.PadRight(6) +
-                eventTypeColumn.PadRight(16) + 
+                eventTypeColumn.PadRight(20) + 
                 qtyByPriceColumn.PadRight(20) +
                 detailsColumn;
 

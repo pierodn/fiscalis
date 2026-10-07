@@ -46,9 +46,9 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="FxRates.cs" />
-    <Compile Include="SoftAssert.cs" />
+    <Compile Include="Precondition.cs" />
     <Compile Include="TaxReport.cs" />
-    <Compile Include="FlexQueryResponse.cs" />
+    <Compile Include="ActivityReport.cs" />
     <Compile Include="Program.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
   </ItemGroup>
