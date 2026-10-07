@@ -3,10 +3,12 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.IO; // temp
 using System.Diagnostics;
-
-using Nationalbanken;
-using InteractiveBrokers;
 using MyDiagnostics;
+
+using InteractiveBrokers;
+using Nationalbanken;
+using TaxEngine;
+
 
 namespace LedgerToTax
 {
@@ -54,15 +56,16 @@ namespace LedgerToTax
             // TODO: Deposits & Withdrawals
             // TODO: Interest
 
-            Console.WriteLine();
-            Console.WriteLine("Start Period Positions");
-            Console.WriteLine("======================");
-
             //
             // Process events in order by date
             //
 
             TaxReport report = new TaxReport(previousActivityReport.openPositions);
+
+            Console.WriteLine();
+            Console.WriteLine("Start Period Positions");
+            Console.WriteLine("======================");
+            report.WritePositions();
 
             Console.WriteLine();
             Console.WriteLine("Pooling events");

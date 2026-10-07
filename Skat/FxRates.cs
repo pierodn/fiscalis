@@ -7,7 +7,6 @@ using System.Diagnostics;
 
 namespace Nationalbanken
 {
-
     public class FxRates
     {
         // https://nationalbanken.statbank.dk

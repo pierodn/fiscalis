@@ -8,8 +8,10 @@ using System.Diagnostics;
 
 using MyDiagnostics;
 using Nationalbanken;
+using InteractiveBrokers;
 
-namespace InteractiveBrokers
+
+namespace TaxEngine
 {
     public class RealizedGain
     {

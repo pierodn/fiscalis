@@ -45,6 +45,7 @@
     <Reference Include="System.Xml" />
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="Amount.cs" />
     <Compile Include="FxRates.cs" />
     <Compile Include="Precondition.cs" />
     <Compile Include="TaxReport.cs" />

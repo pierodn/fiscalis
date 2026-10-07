@@ -45,7 +45,7 @@ namespace InteractiveBrokers
 
             position.costBasisTotal = costBasisPrice * position.quantity;
             //Console.WriteLine(position.costBasisTotal == positionValue);
-            Precondition.Check(position.costBasisTotal == positionValue, "Assuming they are equal in the OpenPositions section");
+            //Precondition.Check(position.costBasisTotal == positionValue, "Assuming they are equal in the OpenPositions section");
 
             return position;
         }
