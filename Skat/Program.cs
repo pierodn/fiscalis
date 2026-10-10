@@ -20,10 +20,12 @@ namespace LedgerToTax
             // Input
             // ====================================
 
+            const bool WriteRealizedGainsList = false;
             const string Depot = "C:\\Users\\Admin\\Downloads\\";
 
-            var fxRates = FxRates.Import(Depot + "nationalbanken_2023-2026-09-16.csv");
-            var previousActivityReport = ActivityReport.Import(Depot + "IBKR_2022_Schwab.csv");
+            // Goto: https://www.nationalbanken.dk/en => Exchange Rates => US dollars => Download Excel
+            var fxRates = FxRates.Import2(Depot + "nationalbanken_2010-2026-10-08_USD.csv");
+            var startPeriodPositions = ActivityReport.ExtractPositions(Depot + "IBKR_2022_Schwab.csv");
             var currentActivityReport = ActivityReport.Import(Depot + "IBKR_2023_1709.csv");
 
 
@@ -60,16 +62,16 @@ namespace LedgerToTax
             // Process events in order by date
             //
 
-            TaxReport report = new TaxReport(previousActivityReport.openPositions);
+            TaxReport report = new TaxReport(startPeriodPositions);
 
             Console.WriteLine();
             Console.WriteLine("Start Period Positions");
-            Console.WriteLine("======================");
+            Console.WriteLine("===================================================================");
             report.WritePositions();
 
             Console.WriteLine();
             Console.WriteLine("Pooling events");
-            Console.WriteLine("==============");
+            Console.WriteLine("===================================================================");
 
             events.Sort(delegate(Event a, Event b) { return a.dateTime.CompareTo(b.dateTime); });
 
@@ -79,12 +81,14 @@ namespace LedgerToTax
 
                 if (evt.type == EventType.WithholdingTax)
                 {
-                    report.totalWithholdingTax += evt.amount;
+                    report.totalWithholdingTaxUSD += evt.amount;
+                    report.totalWithholdingTaxDKK += evt.dailyRate * evt.amount;
                     continue; 
                 }
                 else if (evt.type == EventType.Dividends)
                 {
-                    report.totalDividends += evt.amount;
+                    report.totalDividendsUSD += evt.amount;
+                    report.totalDividendsDKK += evt.dailyRate * evt.amount;
                     continue;
                 }
                         
@@ -99,30 +103,43 @@ namespace LedgerToTax
 
                 switch (evt.type)
                 {
+                    // TODO Have EventType.Buy and EventType.Sell and positive quantity and amount
+                    // instead of EventType.Trade and positive/negative quantity and amount. 
                     case EventType.Trade:
-                        if (evt.quantity > 0)
+                        Boolean IsBUY = evt.quantity > 0;
+                        if (IsBUY)
                         {
                             position.quantity += evt.quantity;
-                            position.costBasisTotal += -evt.amount; // TODO ask Claude to come back to ABS(amount)
+                            position.totalCostUSD += -evt.amount;
+                            position.totalCostDKK += -evt.dailyRate * evt.amount;
                         }
-                        else
+                        else // SELL
                         {
                             Precondition.Check(position.quantity > 0);
 
-                            decimal averageCost = position.quantity == 0 ? 0m : position.costBasisTotal / position.quantity;
-                            decimal soldQuantity = -evt.quantity; 
-                            decimal costOfSold = averageCost * soldQuantity;
-                            decimal realizedGain = evt.amount - costOfSold;
+                            decimal averageCostUSD = position.quantity == 0 ? 0m : position.totalCostUSD / position.quantity;
+                            decimal averageCostDKK = position.quantity == 0 ? 0m : position.totalCostDKK / position.quantity;
+                            
+                            decimal soldQuantity = -evt.quantity;
+                            decimal costOfSoldUSD = averageCostUSD * soldQuantity;
+                            decimal costOfSoldDKK = averageCostDKK * soldQuantity;
 
-                            RealizedGain gain = new RealizedGain(evt.symbol, realizedGain, evt.dateTime);
-                            report.realizedGains.Add(gain);
-                            report.totalGainLoss += realizedGain;
+                            decimal realizedGainUSD =                 evt.amount - costOfSoldUSD;
+                            decimal realizedGainDKK = evt.dailyRate * evt.amount - costOfSoldDKK;
 
-                            position.quantity += evt.quantity;
-                            position.costBasisTotal -= costOfSold;
+                            RealizedGain gain = new RealizedGain(evt.symbol, realizedGainDKK, evt.dateTime);
+                            report.realizedGainsDKK.Add(gain);
+
+                            report.totalGainLossUSD += realizedGainUSD;
+                            report.totalGainLossDKK += realizedGainDKK;
+
+                            position.quantity += evt.quantity; // it's subtracting
+                            position.totalCostUSD -= costOfSoldUSD;
+                            position.totalCostDKK -= costOfSoldDKK;
 
                             if (position.quantity < 1)
                             {
+                                Precondition.Check(position.quantity == 0);
                                 report.positions.Remove(evt.symbol);
                             }
                         }
@@ -130,28 +147,36 @@ namespace LedgerToTax
 
                     case EventType.Split:
                         Precondition.Check(position.quantity > 0);
-                        position.quantity += evt.quantity; // cost basis total unchanged
+                        position.quantity += evt.quantity; // total cost unchanged
                         break;
 
                     case EventType.Transfer:
+                        // TODO EventType.TransferIn/Out and quantity always positive
                         if (evt.quantity > 0)
                         {
                             position.quantity += evt.quantity;
-                            position.costBasisTotal += evt.amount;
+                            position.totalCostUSD += evt.amount;
+                            position.totalCostDKK += evt.dailyRate * evt.amount;
                         }
                         else
                         {
                             Precondition.Check(position.quantity > 0);
 
-                            decimal avgCost = position.quantity == 0 ? 0m : position.costBasisTotal / position.quantity;
-                            decimal xferQty = -evt.quantity;
-                            decimal costOfTransfer = avgCost * xferQty;
+                            decimal averageCostUSD = position.quantity == 0 ? 0m : position.totalCostUSD / position.quantity;
+                            decimal averageCostDKK = position.quantity == 0 ? 0m : position.totalCostDKK / position.quantity;
+
+                            decimal transferedQuantity = -evt.quantity;
+
+                            decimal costOfTransferedUSD = averageCostUSD * transferedQuantity;
+                            decimal costOfTransferedDKK = averageCostDKK * transferedQuantity;
 
                             position.quantity += evt.quantity;
-                            position.costBasisTotal -= costOfTransfer;
+                            position.totalCostUSD -= costOfTransferedUSD;
+                            position.totalCostDKK -= costOfTransferedDKK;
 
                             if (position.quantity < 1)
                             {
+                                Precondition.Check(position.quantity == 0);
                                 report.positions.Remove(evt.symbol);
                             }
                         }
@@ -159,73 +184,84 @@ namespace LedgerToTax
 
                     case EventType.ReturnOfCapital:
                         Precondition.Check(position.quantity > 0);
-                        if (evt.amount > position.costBasisTotal) // The company handing you back a piece of your own original investment, not profit;
-                        {
-                            decimal realizedGain = evt.amount - position.costBasisTotal;
-                            RealizedGain gain = new RealizedGain(evt.symbol, realizedGain, evt.dateTime);
-                            report.realizedGains.Add(gain);
+                        Precondition.Check(position.totalCostDKK > 0);
 
-                            report.totalGainLoss += realizedGain;
-                            position.costBasisTotal = 0m;
-                            Trace.TraceError("Case ROC amount > costBasisTotal. Difference: " + realizedGain);
+                        // The company handing you back a piece of your own original investment, not profit.
+                        // But if the capital returned is more than what you invested, then it is a profit (gain).
+                        // The capital returned is supposed to only reduce your totalCost, not the quantity.
+
+                        bool IsROCMoreThanWhatInvested = evt.dailyRate * evt.amount > position.totalCostDKK;
+                        if (IsROCMoreThanWhatInvested) 
+                        {
+                            decimal realizedGainUSD =                 evt.amount - position.totalCostUSD;
+                            decimal realizedGainDKK = evt.dailyRate * evt.amount - position.totalCostDKK;
+
+                            Precondition.Check(realizedGainUSD > 0);
+                            Precondition.Check(realizedGainDKK > 0);
+
+                            RealizedGain gain = new RealizedGain(evt.symbol, realizedGainDKK, evt.dateTime);
+                            report.realizedGainsDKK.Add(gain);
+
+                            report.totalGainLossUSD += realizedGainUSD;
+                            report.totalGainLossDKK += realizedGainDKK;
+
+                            position.totalCostUSD = 0m;
+                            position.totalCostDKK = 0m;
+
+                            Trace.TraceError("Case ROC amount > costBasisTotal. Difference: {0} USD", realizedGainUSD);
                         }
                         else
                         {
-                            position.costBasisTotal -= evt.amount;
+                            position.totalCostUSD -=                 evt.amount;
+                            position.totalCostDKK -= evt.dailyRate * evt.amount;
                         }
                         break;
                 }
             }
 
 
-            decimal approxDKKtoUSDrate = 0.15m;
 
             Console.WriteLine();
             Console.WriteLine("Tax Report");
-            Console.WriteLine("==========");
-            Console.WriteLine("totalGainLoss        (Rubrik 454): {0:F2} (USD {1:F2})", report.totalGainLoss, approxDKKtoUSDrate * report.totalGainLoss);
-            Console.WriteLine("totalDividends       (Rubrik 452): {0:F2} (USD {1:F2})", report.totalDividends, approxDKKtoUSDrate * report.totalDividends);
-            Console.WriteLine("totalWithholdingTax  (Rubrik 496): {0:F2} (USD {1:F2})", report.totalWithholdingTax, approxDKKtoUSDrate * report.totalWithholdingTax);
-            Console.WriteLine("interestReceived     (Rubrik 431): {0:F2} (USD {1:F2})", report.interestReceived, approxDKKtoUSDrate * report.interestReceived);
-            Console.WriteLine("yearEndAccountValue  (Rubrik 490): {0:F2} (USD {1:F2})", report.yearEndAccountValue, approxDKKtoUSDrate * report.yearEndAccountValue);
+            Console.WriteLine("======================================================");
+
+            Console.WriteLine("totalGainLoss                     : {0:F2} USD", report.totalGainLossUSD);
+            Console.WriteLine("totalDividends                    : {0:F2} USD", report.totalDividendsUSD);
+            Console.WriteLine("totalWithholdingTax               : {0:F2} USD", report.totalWithholdingTaxUSD);
+            Console.WriteLine("totalInterest                     : {0:F2} USD", report.totalInterestUSD);
+            Console.WriteLine("yearEndAccountValue               : {0:F2} USD", report.yearEndAccountValueUSD);
 
             Console.WriteLine();
-            Console.WriteLine("End Period Positions");
-            Console.WriteLine("====================");
+            Console.WriteLine("totalGainLoss        (Rubrik 454) : {0:F2} DKK", report.totalGainLossDKK);
+            Console.WriteLine("totalDividends       (Rubrik 452) : {0:F2} DKK", report.totalDividendsDKK);
+            Console.WriteLine("totalWithholdingTax  (Rubrik 496) : {0:F2} DKK", report.totalWithholdingTaxDKK);
+            Console.WriteLine("totalInterest        (Rubrik 431) : {0:F2} DKK", report.totalInterestDKK);
+            Console.WriteLine("yearEndAccountValue  (Rubrik 490) : {0:F2} DKK", report.yearEndAccountValueDKK);
+
+
+            Console.WriteLine();
+            Console.WriteLine("End Period Positions (calculated from initial positions and events)");
+            Console.WriteLine("===================================================================");
             report.WritePositions();
 
+            if (WriteRealizedGainsList)
+            {
+                // TODO TODO.WriteRealizedGains();
+            }
 
-            // Press Enter
+            Console.WriteLine();
+            Console.WriteLine("End Period Positions (from IBKR activity report)");
+            Console.WriteLine("===================================================================");
+            currentActivityReport.WriteOpenPositions();
+
+            Console.WriteLine();
+            Console.WriteLine("Change in NAV");
+            Console.WriteLine("===================================================================");
+            Console.WriteLine("TODO");
+
+            Console.WriteLine();
+            Console.WriteLine("PRESS ENTER");
             Console.ReadLine();
-
-
-            /*
-            TODO
-            - Create a List<PoolEvent> from sections: trades, transfers, corporate actions, cash transactions.
-              * And while creating, apply the fxRate to the target Currency (DKK) 
-              - A pool event is an event that can affect the PooledPositions.
-              - So the pool events are: 
-                * trades
-                * transfers
-                * splits
-                - Return Of Capital 
-              - NOTES 
-                - From CashTransactions, you get:
-                  - Return Of Capital (ROC) => the only one that affects the PooledPositions' AverageCostBasis.
-                  - WithouldingTax, Dividends => don't affect the PooledPositions and could be added to totals already here.
-                  - broker interest received => same, it goes to total interest received.
-                  - Broker fees/commissions => should someway be folded into cost basis / sale proceeds.
-                  - other non-trade-tied fees (like monthly account fees) => not deductible.
-
-             - Sort the poolEvents by dateTime.
-
-             - Process the poolEvents to update the PooledPositions
-               - BUY/SELL/transfer will 
-                 - update the PooledPositions
-                 - recalculate the new AverageCostPerUnit
-               - SELL triggers gain/loss and add up to totalGainLoss 
-                 - Add a warning for the ETF MAG7
-            */
 
 
             // NOTES

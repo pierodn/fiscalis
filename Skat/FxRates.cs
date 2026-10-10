@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.IO;
+using System.Globalization;
 using System.Diagnostics;
 
 namespace Nationalbanken
@@ -43,11 +44,14 @@ namespace Nationalbanken
             return null;
         }
 
-        public static FxRates Import(string path)
+        public static FxRates Import(string filePath)
         {
+            Console.WriteLine();
+            Console.WriteLine("IMPORTING Nationalbanken USD-DKK Rates: " + filePath);
+
             var dictionary = new Dictionary<string, decimal>();
 
-            using (var reader = new StreamReader(path))
+            using (var reader = new StreamReader(filePath))
             {
                 reader.ReadLine();
                 reader.ReadLine();
@@ -88,6 +92,39 @@ namespace Nationalbanken
 
             return year + "-" + month + "-" + day;
         }
+
+        public static FxRates Import2(string filePath)
+        {
+            Console.WriteLine();
+            Console.WriteLine("IMPORTING Nationalbanken USD-DKK Rates: " + filePath);
+
+            var dictionary = new Dictionary<string, decimal>();
+
+            string[] lines = File.ReadAllLines(filePath);
+            for (int i = 3; i < lines.Length; i++)
+            {
+                string[] parts = lines[i].Split(';');
+                string key = ConvertDate2(parts[0]);
+                decimal rate = decimal.Parse( parts[1], CultureInfo.InvariantCulture);
+
+                dictionary[key] = rate / QuotationRate;
+            }
+
+            var convertionRates = new FxRates(dictionary);
+            return convertionRates;
+        }
+
+        // Convert from dd-mm-yyyy to yyyy-mm-dd
+        private static string ConvertDate2(string raw)
+        {
+            string day = raw.Substring(0, 2);
+            string month = raw.Substring(3, 2);
+            string year = raw.Substring(6, 4);
+            
+            return year + "-" + month + "-" + day;
+        }
+
+
     }
 
 }

@@ -29,20 +29,29 @@ namespace TaxEngine
 
     public class TaxReport
     {
-        // For reporting to SKAT
-        public decimal totalGainLoss;       // Rubrik 454: Foreign Capital Gains/Losses (calculated in DKK)
-        public decimal totalDividends;      // Rubrik 452: Foreign Dividends - Gross
-        public decimal totalWithholdingTax; // Rubrik 496: Foreign Withholding Tax Paid
-        public decimal interestReceived;    // Rubrik 431: Foreign interest income and other capital income.
-        public decimal yearEndAccountValue; // Rubrik 490: Year-End Custody Account Value (from year-end prices)
+        // For me to verify against Activity Statement (Change in NAV)
+        public decimal totalGainLossUSD;
+        public decimal totalDividendsUSD;
+        public decimal totalWithholdingTaxUSD;
+        public decimal totalInterestUSD;
+        public decimal yearEndAccountValueUSD;
 
+        // For reporting to SKAT
+        public decimal totalGainLossDKK;       // Rubrik 454: Foreign Capital Gains/Losses (calculated in DKK)
+        public decimal totalDividendsDKK;      // Rubrik 452: Foreign Dividends - Gross
+        public decimal totalWithholdingTaxDKK; // Rubrik 496: Foreign Withholding Tax Paid
+        public decimal totalInterestDKK;    // Rubrik 431: Foreign interest income and other capital income.
+        public decimal yearEndAccountValueDKK; // Rubrik 490: Year-End Custody Account Value (from year-end prices)
+
+        // StartPeriodPositions and EndPeriodPositions after the events
         public Dictionary<string, Position> positions = new Dictionary<string, Position>();
 
-        // For inspection
-        public List<RealizedGain> realizedGains = new List<RealizedGain>();
+        // For SKAT inspection
+        public List<RealizedGain> realizedGainsDKK = new List<RealizedGain>();
 
-        public TaxReport(List<Position> openPositions)
+        public TaxReport(List<Position> openPositions) 
         {
+            // TODO convert to DKK using the start period daily fxrate (?)
             positions = openPositions.ToDictionary(p => p.symbol);
         }
 
@@ -60,10 +69,7 @@ namespace TaxEngine
             keys.Sort(StringComparer.Ordinal);
             foreach (string key in keys)
             {
-                string symbol = this.positions[key].symbol.PadRight(8);
-                string quantity = this.positions[key].quantity.ToString().PadRight(8);
-                string costBasisTotal = this.positions[key].costBasisTotal.ToString("F2", CultureInfo.InvariantCulture);
-                Console.WriteLine(string.Format("{0} {1} {2}", symbol, quantity, costBasisTotal));
+                Console.WriteLine(this.positions[key]);
             }
 
             Console.SetOut(original); // restore
@@ -89,7 +95,7 @@ namespace TaxEngine
         public string symbol;
         public string isin;
         public string dateTime;
-
+        public decimal dailyRate;
         public EventType type;
 
         public decimal quantity;   // signed for Trade (+buy/-sell); positive for transfers; extra shares for splits.
@@ -105,47 +111,46 @@ namespace TaxEngine
         private Event(
             string symbol,
             string dateTime,
+            decimal dailyRate, // to reportingCurrency
+            // TODO string broker // IBKR, SAXO
             EventType type,
             decimal quantity,
-            decimal price,
-            decimal commission, // TODO remove ?
-            decimal amount,
+            decimal price,      // TODO rename priceUSD ?
+            decimal commission, // TODO rename commissionUSD ?
+            decimal amount,     // TODO rename amountUSD ?
             decimal splitRatio  // TODO remove ?
             ) 
         {
             this.symbol = symbol;
             this.dateTime = dateTime;
+            this.dailyRate = dailyRate;
             this.type = type;
             this.quantity = quantity;
             this.price = price;
-            this.commission = commission; // TODO remove ?
+            this.commission = commission;
             this.amount = amount;
-            this.splitRatio = splitRatio; // TODO remove ?
+            this.splitRatio = splitRatio;
         }
 
         public static Event FromTrade(Trade trade, FxRates fxRates)
         {
             Trace.Assert(trade.quantity != 0);
-            //Precondition.Check( Math.Abs( Math.Abs(trade.proceeds) - trade.quantity * trade.tradePrice < 0.01m), "Assuming they are equal");
             Trace.Assert((trade.buySell.ToUpperInvariant() == "BUY") && (trade.quantity > 0) && (trade.proceeds < 0)
                       || (trade.buySell.ToUpperInvariant() == "SELL") && (trade.quantity < 0) && (trade.proceeds > 0));
 
-            decimal? dailyRatefound = fxRates.GetRate(trade.dateTime);
-            Trace.Assert(dailyRatefound != null);
-            decimal dailyRate = dailyRatefound.GetValueOrDefault();
-
-            decimal proceeds = dailyRate * trade.proceeds;
-            decimal commission = dailyRate * trade.commission;
-            decimal netCashFlow = proceeds + commission; // negative = cash out (buy), positive = cash in (sell)
+            decimal? dailyRateFound = fxRates.GetRate(trade.dateTime);
+            Trace.Assert(dailyRateFound.HasValue);
+            decimal dailyRate = dailyRateFound.Value;
 
             return new Event(
                 trade.symbol,
-                trade.dateTime, 
+                trade.dateTime,
+                dailyRate,
                 EventType.Trade, 
                 trade.quantity,
-                dailyRate * trade.tradePrice,
-                dailyRate * trade.commission, // TODO remove ?
-                netCashFlow,  // amount
+                trade.tradePrice, // TODO remove ?
+                trade.commission, // TODO remove ?
+                trade.proceeds + trade.commission,  // netCashFlow => amount // negative = cash out (buy), positive = cash in (sell)
                 0.0m); // splitRatio
         }
 
@@ -155,32 +160,34 @@ namespace TaxEngine
             Trace.Assert((transfer.type == "IN") && (transfer.quantity > 0) 
                       || (transfer.type == "OUT") && (transfer.quantity < 0));
 
-            decimal? dailyRatefound = fxRates.GetRate(transfer.dateTime);
-            Trace.Assert(dailyRatefound != null);
-            decimal dailyRate = dailyRatefound.GetValueOrDefault();
+            decimal? dailyRateFound = fxRates.GetRate(transfer.dateTime);
+            Trace.Assert(dailyRateFound.HasValue);
+            decimal dailyRate = dailyRateFound.Value;
 
             return new Event(
                 transfer.symbol,
                 transfer.dateTime,
+                dailyRate,
                 EventType.Transfer,
                 transfer.quantity,
-                dailyRate * transfer.costBasis / transfer.quantity,  // CostBasisPerUnit
-                dailyRate * transfer.transferPrice,                  // Commission is the transferPrice (usually zero).        
-                dailyRate * transfer.costBasis,                      // CostBasis (Amount)
-                0.0m);                                               // no splitRatio
+                transfer.costBasis / transfer.quantity,  // CostBasisPerUnit
+                transfer.transferPrice,                  // Commission is the transferPrice (usually zero).        
+                transfer.costBasis,                      // CostBasis (Amount)
+                0.0m);                                   // no splitRatio
         }
 
         public static Event FromCorporateAction(CorporateAction corporateAction, FxRates fxRates)
         {
             Trace.Assert(corporateAction.quantity != 0);
-/*
-            decimal? dailyRatefound = fxRates.GetRate(corporateAction.dateTime);
-            Trace.Assert(dailyRatefound != null);
-            decimal dailyRate = dailyRatefound.GetValueOrDefault();
-            */
+
+            decimal? dailyRateFound = fxRates.GetRate(corporateAction.dateTime);
+            Trace.Assert(dailyRateFound.HasValue);
+            decimal dailyRate = dailyRateFound.Value;
+
             Event evt = new Event();
             evt.symbol = corporateAction.symbol;
             evt.dateTime = corporateAction.dateTime;
+            evt.dailyRate = dailyRate;
 
             switch (corporateAction.type)
             {
@@ -202,7 +209,7 @@ namespace TaxEngine
                     //  rather than here in BuildCorporateActionEvent, since this function doesn't see Position state)
                     evt.type = EventType.Trade;
                     evt.quantity = corporateAction.quantity;       // should be negative = full position close-out
-                    evt.amount = 0m; //dailyRate * Math.Abs(corporateAction.proceeds); // proceeds received (0 for DW)
+                    evt.amount = 0m; // proceeds received (0 for DW)
                     break;
 
                 default:
@@ -220,13 +227,14 @@ namespace TaxEngine
         {
             Trace.Assert(cashTransaction.amount != 0);
 
-            decimal? dailyRatefound = fxRates.GetRate(cashTransaction.dateTime);
-            Trace.Assert(dailyRatefound != null);
-            decimal dailyRate = dailyRatefound.GetValueOrDefault();
+            decimal? dailyRateFound = fxRates.GetRate(cashTransaction.dateTime);
+            Trace.Assert(dailyRateFound.HasValue);
+            decimal dailyRate = dailyRateFound.Value;
 
             Event evt = new Event();
             evt.symbol = cashTransaction.symbol;
             evt.dateTime = cashTransaction.dateTime;
+            evt.dailyRate = dailyRate;
 
             string t = (cashTransaction.type ?? "").Trim().ToLowerInvariant();
             string d = (cashTransaction.description ?? "").Trim().ToLowerInvariant();
@@ -248,7 +256,7 @@ namespace TaxEngine
             }
 
             evt.quantity = 0m;
-            evt.amount = dailyRate * cashTransaction.amount;
+            evt.amount = cashTransaction.amount;
             evt.splitRatio = 0m;
 
             return evt;

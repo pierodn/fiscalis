@@ -27,10 +27,16 @@ namespace InteractiveBrokers
     {
         public string symbol;
         public decimal quantity;
-        public decimal costBasisTotal; // gennemsnitsmetoden, not the IBKR's FIFO (unless the position results from a single buy).
-        // TODO Remember to change manually this value that comes from the IBKR Flex Query.
+        public decimal totalCostUSD; // This is initially coming from the OpenPositions of the previousActivityReport (if any).
+        public decimal totalCostDKK; // This should somehow be inserted manually because it depends on the DKK-USD rates, which are generally unknown.
+        // public decimal averageCostDKK; // This is gennemsnitsmetoden: averageCostDKK = totalCostDKK / quantity;
 
         static public Position Parse(string line)
+        {
+            return Parse(line, false);
+        }
+
+        static public Position Parse(string line, bool asktotalCostDKK)
         {
             string[] elements = Utils.SplitRow(line);
 
@@ -39,23 +45,47 @@ namespace InteractiveBrokers
             position.symbol = Utils.Trim(elements[0]);
             position.quantity = decimal.Parse(Utils.Trim(elements[2]));
 
-            decimal costBasisPrice = decimal.Parse(Utils.Trim(elements[3]));
-            decimal openPrice = decimal.Parse(Utils.Trim(elements[4])); // TODO maybe not needed
-            decimal positionValue = decimal.Parse(Utils.Trim(elements[5]));
+            decimal costBasisPrice = decimal.Parse(Utils.Trim(elements[3])); // This is the averagePricePerShare.
+            decimal openPrice = decimal.Parse(Utils.Trim(elements[4])); // TODO maybe not needed as it looks generally the same as the costBasisPrice
+            decimal positionValue = decimal.Parse(Utils.Trim(elements[5])); // This is maybe the position value today: todaysPrice * quantity 
 
-            position.costBasisTotal = costBasisPrice * position.quantity;
-            //Console.WriteLine(position.costBasisTotal == positionValue);
-            //Precondition.Check(position.costBasisTotal == positionValue, "Assuming they are equal in the OpenPositions section");
+            position.totalCostUSD = costBasisPrice * position.quantity;
+
+            bool isTotalCostDKKPresent = elements.Length > 6;
+            if (isTotalCostDKKPresent)
+            {
+                position.totalCostDKK = decimal.Parse(Utils.Trim(elements[6])); 
+            } 
+            else if (asktotalCostDKK)
+            {
+                Console.Write("==> Enter the totalCostDkk for the {0} shares of {1}: ", position.quantity, position.symbol);
+                string input = Console.ReadLine();
+                if (input.Length > 0)
+                {
+                    Boolean success = decimal.TryParse(input, out position.totalCostDKK);
+                    if (!success)
+                    {
+                        Trace.Assert(success, "Error parsing decimal");
+                    }
+                }
+            }
 
             return position;
         }
 
         // TODO void ApplyBuy(decimal buyQuantity, decimal tradePrice)
         // TODO decimal ApplySell(decimal sellQuantity, decimal tradePrice)
-
+        
         public override string ToString()
         {
-            return symbol + " " + quantity + " " + costBasisTotal.ToString("F2", CultureInfo.InvariantCulture);
+            string symbol = this.symbol.PadRight(8);
+            string quantity = this.quantity.ToString().PadRight(8);
+            string totalCostUSD = this.totalCostUSD.ToString("F2", CultureInfo.InvariantCulture).PadRight(10);
+            string totalCostDKK = this.totalCostDKK.ToString("F2", CultureInfo.InvariantCulture).PadRight(10);
+            string USD = "USD".PadRight(8);
+            string DKK = "DKK".PadRight(8);
+
+            return string.Format("{0} {1} {2} {3} {4} {5}", symbol, quantity, totalCostUSD, USD, totalCostDKK, DKK);
         }
     }
 
@@ -194,9 +224,38 @@ namespace InteractiveBrokers
             this.transfers = transfers;
         }
 
+        public void WriteOpenPositions()
+        {
+            foreach (Position position in this.openPositions.OrderBy(x => x.symbol))
+            {
+                Console.WriteLine(position);
+            }
+        }
+
+        public static List<Position> ExtractPositions(string filePath)
+        {
+            Console.WriteLine();
+            Console.WriteLine("EXTRACTING initial positions from Activity Report: " + filePath);
+
+            ActivityReport report = ActivityReport.Import(filePath, true);
+            return report.openPositions;
+        }
+
+
         public static ActivityReport Import(string filePath)
         {
-            // TODO maybe the FIFO CostBasisPrice for reference, but can get rid of OpenPrice, PositionValue.
+            return Import(filePath, false);
+        }
+
+        public static ActivityReport Import(string filePath, bool askTotalCostDKK)
+        {
+            if (!askTotalCostDKK)
+            {
+                Console.WriteLine();
+                Console.WriteLine("IMPORTING IBKR Activity Report: " + filePath);
+            }
+
+            // TODO maybe the FIFO CostBasisPrice for reference, but can get rid of OpenPrice?
             const string PositionsSectionHeader = "\"Symbol\",\"ISIN\",\"Quantity\",\"CostBasisPrice\",\"OpenPrice\",\"PositionValue\"";
             // TODO can remove Buy/Sell, CurrencyPrimary, IBCommissionCurrency. 
             // TODO Can keep Proceeds maybe for consistency-check?
@@ -231,7 +290,7 @@ namespace InteractiveBrokers
             var positions = new List<Position>();
             for (int i = indexPositionsSection + 1; i < indexTradesSection; i++)
             {
-                positions.Add(Position.Parse(lines[i]));
+                positions.Add(Position.Parse(lines[i], askTotalCostDKK));
             }
 
             var trades = new List<Trade>();
