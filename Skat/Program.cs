@@ -20,13 +20,16 @@ namespace LedgerToTax
             // Input
             // ====================================
 
+            const bool WriteEventSequence = true;
             const bool WriteRealizedGainsList = false;
+
+
             const string Depot = "C:\\Users\\Admin\\Downloads\\";
 
-            // Goto: https://www.nationalbanken.dk/en => Exchange Rates => US dollars => Download Excel
+            // HOW: https://www.nationalbanken.dk/en => Exchange Rates => US dollars => Download Excel
             var fxRates = FxRates.Import2(Depot + "nationalbanken_2010-2026-10-08_USD.csv");
             var startPeriodPositions = ActivityReport.ExtractPositions(Depot + "IBKR_2022_Schwab.csv");
-            var currentActivityReport = ActivityReport.Import(Depot + "IBKR_2023_1709.csv");
+            var currentActivityReport = ActivityReport.Import(Depot + "IBKR_2023.csv");
 
 
             // ====================================
@@ -50,6 +53,11 @@ namespace LedgerToTax
                 events.Add(Event.FromCorporateAction(corporateAction, fxRates));
             }
 
+            foreach (var grant in currentActivityReport.grants)
+            {
+                events.Add(Event.FromGrantActivity(grant, fxRates));
+            }
+
             foreach (var cashTransaction in currentActivityReport.cashTransactions)
             {
                 events.Add(Event.FromCashTransaction(cashTransaction, fxRates));
@@ -69,15 +77,21 @@ namespace LedgerToTax
             Console.WriteLine("===================================================================");
             report.WritePositions();
 
-            Console.WriteLine();
-            Console.WriteLine("Pooling events");
-            Console.WriteLine("===================================================================");
-
             events.Sort(delegate(Event a, Event b) { return a.dateTime.CompareTo(b.dateTime); });
+
+            if (WriteEventSequence)
+            {
+                Console.WriteLine();
+                Console.WriteLine("Pooling Events");
+                Console.WriteLine("===================================================================");
+            }
 
             foreach (Event evt in events)
             {
-                Console.WriteLine(evt);
+                if (WriteEventSequence)
+                {
+                    Console.WriteLine(evt);
+                }
 
                 if (evt.type == EventType.WithholdingTax)
                 {
@@ -89,6 +103,29 @@ namespace LedgerToTax
                 {
                     report.totalDividendsUSD += evt.amount;
                     report.totalDividendsDKK += evt.dailyRate * evt.amount;
+                    continue;
+                }
+                else if (evt.type == EventType.Interest)
+                {
+                    bool isInterestExpense = (evt.amount < 0);
+                    if (isInterestExpense)
+                    {
+                        // This is negative, paid to broker normally when you have leverage
+                        report.totalInterestExpenseUSD += evt.amount;
+                        report.totalInterestExpenseDKK += evt.dailyRate * evt.amount;
+                    }
+                    else
+                    {
+                        // This is positive interested paid by broker
+                        report.totalInterestUSD += evt.amount;
+                        report.totalInterestDKK += evt.dailyRate * evt.amount;
+                    }
+                    continue;
+                }
+                else if (evt.type == EventType.DepositOrWithdrawal)
+                {
+                    report.totalDepositsWithdrawalsUSD += evt.amount;
+                    report.totalDepositsWithdrawalsDKK += evt.dailyRate * evt.amount;
                     continue;
                 }
                         
@@ -112,6 +149,9 @@ namespace LedgerToTax
                             position.quantity += evt.quantity;
                             position.totalCostUSD += -evt.amount;
                             position.totalCostDKK += -evt.dailyRate * evt.amount;
+
+                            report.totalCommissionsUSD +=                 evt.commission;
+                            report.totalCommissionsDKK += evt.dailyRate * evt.commission;
                         }
                         else // SELL
                         {
@@ -142,6 +182,9 @@ namespace LedgerToTax
                                 Precondition.Check(position.quantity == 0);
                                 report.positions.Remove(evt.symbol);
                             }
+
+                            report.totalCommissionsUSD +=                 evt.commission;
+                            report.totalCommissionsDKK += evt.dailyRate * evt.commission;
                         }
                         break;
 
@@ -224,25 +267,34 @@ namespace LedgerToTax
             Console.WriteLine();
             Console.WriteLine("Tax Report");
             Console.WriteLine("======================================================");
-
-            Console.WriteLine("totalGainLoss                     : {0:F2} USD", report.totalGainLossUSD);
-            Console.WriteLine("totalDividends                    : {0:F2} USD", report.totalDividendsUSD);
-            Console.WriteLine("totalWithholdingTax               : {0:F2} USD", report.totalWithholdingTaxUSD);
             Console.WriteLine("totalInterest                     : {0:F2} USD", report.totalInterestUSD);
-            Console.WriteLine("yearEndAccountValue               : {0:F2} USD", report.yearEndAccountValueUSD);
+            Console.WriteLine("totalInterestExpense              : {0:F2} USD", report.totalInterestExpenseUSD);
+            Console.WriteLine("totalDividends                    : {0:F2} USD", report.totalDividendsUSD);
+            Console.WriteLine("totalGainLoss                     : {0:F2} USD", report.totalGainLossUSD);
+            Console.WriteLine("totalWithholdingTax               : {0:F2} USD", report.totalWithholdingTaxUSD); 
+            Console.WriteLine("totalCommissions                  : {0:F2} USD", report.totalCommissionsUSD);
+            Console.WriteLine("yearEndPorfolioValue              : {0:F2} USD", report.yearEndPorfolioValueUSD);
+            Console.WriteLine("totalDepositsWithdrawals          : {0:F2} USD", report.totalDepositsWithdrawalsUSD);
 
             Console.WriteLine();
-            Console.WriteLine("totalGainLoss        (Rubrik 454) : {0:F2} DKK", report.totalGainLossDKK);
-            Console.WriteLine("totalDividends       (Rubrik 452) : {0:F2} DKK", report.totalDividendsDKK);
-            Console.WriteLine("totalWithholdingTax  (Rubrik 496) : {0:F2} DKK", report.totalWithholdingTaxDKK);
+            Console.WriteLine("Tax Report (for SKAT)");
+            Console.WriteLine("======================================================");
             Console.WriteLine("totalInterest        (Rubrik 431) : {0:F2} DKK", report.totalInterestDKK);
-            Console.WriteLine("yearEndAccountValue  (Rubrik 490) : {0:F2} DKK", report.yearEndAccountValueDKK);
+            Console.WriteLine("totalInterestExpense (Rubrik 432) : {0:F2} DKK", report.totalInterestExpenseDKK);
+            Console.WriteLine("totalDividends       (Rubrik 452) : {0:F2} DKK", report.totalDividendsDKK);
+            Console.WriteLine("totalGainLoss        (Rubrik 454) : {0:F2} DKK", report.totalGainLossDKK);
+            Console.WriteLine("totalWithholdingTax  (Rubrik 496) : {0:F2} DKK", report.totalWithholdingTaxDKK);
+            Console.WriteLine("totalCommissions                  : {0:F2} DKK", report.totalCommissionsDKK);
+            Console.WriteLine("yearEndPorfolioValue (Rubrik 490) : {0:F2} DKK", report.yearEndPorfolioValueDKK);
+            Console.WriteLine("totalDepositsWithdrawals          : {0:F2} DKK", report.totalDepositsWithdrawalsDKK);
 
 
             Console.WriteLine();
-            Console.WriteLine("End Period Positions (calculated from initial positions and events)");
+            Console.WriteLine("End Period Positions (calculated from StartPeriodPositions and Events)");
             Console.WriteLine("===================================================================");
             report.WritePositions();
+            Console.WriteLine();
+            Console.WriteLine("NOTE: The totalCostDKK values above have to be copied MANUALLY in the StartPeriodPositions of next period.");
 
             if (WriteRealizedGainsList)
             {
@@ -250,47 +302,18 @@ namespace LedgerToTax
             }
 
             Console.WriteLine();
-            Console.WriteLine("End Period Positions (from IBKR activity report)");
+            Console.WriteLine("End Period Positions (from given IBKR Activity Report)");
             Console.WriteLine("===================================================================");
             currentActivityReport.WriteOpenPositions();
 
             Console.WriteLine();
-            Console.WriteLine("Change in NAV");
+            Console.WriteLine("Change in NAV (from given IBKR Activity Report)");
             Console.WriteLine("===================================================================");
-            Console.WriteLine("TODO");
+            currentActivityReport.WriteChangeInNAV();
 
             Console.WriteLine();
             Console.WriteLine("PRESS ENTER");
             Console.ReadLine();
-
-
-            // NOTES
-            //
-            // Gennemsnitsmetoden's average
-            // ============================
-            // The OpenPositions section produced by the IBKR Flex Query 
-            // is useful only to verify the symbols and the quantities tracked by IBKR
-            // but it doesn't know about Schwab.
-            // Also CostBasisPrice or OpenPrice are not relateable to the gennemsnitsmetoden's average.
-            // Unfortunately the gennemsnitsmetoden's average will have to be calculated 
-            // by re-playing all buy/sell trades on the stock since the beginning I purchased the first position.
-
-            // However, a positions list that includes quantities and averagecost, is useful as input 
-            // for the AverageCostPoolCalculator, to limit the re-play of the trades to only the current year.
-            // And that section can take place at the beginning, just like the one produced by the Flex Query.
-
-            // Rubrik 454: Steps
-            // =================
-            // https://gemini.google.com/app/12d42110431fceec
-            // ==============================================
-            // * Inject artificially the 918 stocks from the Schwab account witht that costbasis.
-            // - Sort the trades by dateTime.
-            // - Apply splits.
-            // - Convert to DKK.
-            // - Calculate Average Cost per company (Gennemsnitsmetoden) - HOW ????
-            // - 
-
-
         }
              
 

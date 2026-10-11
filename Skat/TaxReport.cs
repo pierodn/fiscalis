@@ -30,18 +30,25 @@ namespace TaxEngine
     public class TaxReport
     {
         // For me to verify against Activity Statement (Change in NAV)
-        public decimal totalGainLossUSD;
-        public decimal totalDividendsUSD;
-        public decimal totalWithholdingTaxUSD;
         public decimal totalInterestUSD;
-        public decimal yearEndAccountValueUSD;
+        public decimal totalInterestExpenseUSD;
+        public decimal totalDividendsUSD;
+        public decimal totalGainLossUSD;
+        public decimal totalWithholdingTaxUSD;
+        public decimal totalCommissionsUSD;
+        public decimal yearEndPorfolioValueUSD;     // Market value of all shares at the End-Year.
+        public decimal totalDepositsWithdrawalsUSD;
 
         // For reporting to SKAT
-        public decimal totalGainLossDKK;       // Rubrik 454: Foreign Capital Gains/Losses (calculated in DKK)
-        public decimal totalDividendsDKK;      // Rubrik 452: Foreign Dividends - Gross
-        public decimal totalWithholdingTaxDKK; // Rubrik 496: Foreign Withholding Tax Paid
-        public decimal totalInterestDKK;    // Rubrik 431: Foreign interest income and other capital income.
-        public decimal yearEndAccountValueDKK; // Rubrik 490: Year-End Custody Account Value (from year-end prices)
+        public decimal totalInterestDKK;            // Rubrik 431: interest (positive)
+        public decimal totalInterestExpenseDKK;     // Rubrik 432: interest (negative) paid because of leverage
+        public decimal totalDividendsDKK;           // Rubrik 452: Foreign Dividends - Gross
+        public decimal totalGainLossDKK;            // Rubrik 454: Foreign Capital Gains/Losses (calculated in DKK)
+        public decimal totalWithholdingTaxDKK;      // Rubrik 496: Foreign Withholding Tax Paid
+        public decimal totalCommissionsDKK;         //
+        public decimal yearEndPorfolioValueDKK;     // Rubrik 490: Market value of all shares at the End-Year (in DKK)
+        public decimal totalDepositsWithdrawalsDKK; //
+        // TODO Rubrik 493. If you owe IBKR money at year end
 
         // StartPeriodPositions and EndPeriodPositions after the events
         public Dictionary<string, Position> positions = new Dictionary<string, Position>();
@@ -87,7 +94,9 @@ namespace TaxEngine
         Transfer,
         ReturnOfCapital,
         WithholdingTax,
-        Dividends
+        Dividends,
+        DepositOrWithdrawal,
+        Interest
     }
 
     public class Event
@@ -220,9 +229,29 @@ namespace TaxEngine
             // TODO The corporateAction.description can be parsed to derive the split ratio.
             // TODO The split ration should match pre-split shares.
 
-            return evt;                         // temp?
+            return evt;     
         }
 
+        public static Event FromGrantActivity(GrantActivity grantActivity, FxRates fxRates)
+        {
+            Trace.Assert(grantActivity.value != 0);
+
+            decimal? dailyRateFound = fxRates.GetRate(grantActivity.vestingDate);
+            Trace.Assert(dailyRateFound.HasValue);
+            decimal dailyRate = dailyRateFound.Value;
+
+            Event evt = new Event();
+            evt.symbol = grantActivity.symbol;
+            evt.dateTime = grantActivity.vestingDate;
+            evt.dailyRate = dailyRate;
+
+            evt.type = EventType.Transfer;
+            evt.quantity = grantActivity.quantity;
+            evt.amount = grantActivity.value;
+
+            return evt;
+        }
+        
         public static Event FromCashTransaction(CashTransaction cashTransaction, FxRates fxRates)
         {
             Trace.Assert(cashTransaction.amount != 0);
@@ -249,6 +278,14 @@ namespace TaxEngine
             else if (t.IndexOf("dividend") >= 0)
             {
                 evt.type = EventType.Dividends;
+            }
+            else if (t.IndexOf("deposit") >= 0)
+            {
+                evt.type = EventType.DepositOrWithdrawal;
+            }
+            else if (t.IndexOf("interest") >= 0)
+            {
+                evt.type = EventType.Interest;
             }
             else
             {
@@ -278,25 +315,27 @@ namespace TaxEngine
                     detailsColumn = "Amount=" + amount + " Commission=" + commission;
                     break;
                 case EventType.Split:
-                    eventTypeColumn = "<Split>";
-                    detailsColumn = "Getting " + quantity;
+                    eventTypeColumn = "SPLIT";
+                    detailsColumn = "Getting extra " + quantity;
                     break;
                 case EventType.Transfer:
-                    eventTypeColumn = "<Transfer>";
-                    qtyByPriceColumn = quantity + "";
-                    detailsColumn = "Amount=" + amount + " (costBasis including commission " + commission + ")";
+                    eventTypeColumn = "TRANSFER";
+                    detailsColumn = "Quantity=" + quantity + " Amount=" + amount + " (costBasis including commission " + commission + ")";
                     break;
                 case EventType.ReturnOfCapital:
-                    eventTypeColumn = "<Return Of Capital>";
-                    detailsColumn = "Amount=" + amount;
+                    detailsColumn = "Return Of Capital: " + amount;
                     break;
                 case EventType.Dividends:
-                    eventTypeColumn = "(dividends)";
-                    detailsColumn = "Amount=" + amount;
+                    detailsColumn = "Dividends: " + amount;
                     break;
                 case EventType.WithholdingTax:
-                    eventTypeColumn = "(withholding tax)";
-                    detailsColumn = "Amount=" + amount;
+                    detailsColumn = "Withholding tax: " + amount;
+                    break;
+                case EventType.DepositOrWithdrawal:
+                    detailsColumn = "Deposit/withdrawal: " + amount;
+                    break;
+                case EventType.Interest:
+                    detailsColumn = "Interest: " + amount;
                     break;
                 default:
                     Trace.TraceError("Unhandled event type: " + Enum.GetName(typeof(EventType), type));

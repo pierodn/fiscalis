@@ -23,6 +23,46 @@ namespace InteractiveBrokers
         }
     }
 
+    public class ChangeInNAV
+    {
+        public string fromDate;
+        public string toDate;
+        public decimal startingValue;
+        public decimal markToMarket;
+        public decimal depositsWithdrawals;
+        public decimal grantActivity;
+        public decimal dividends;
+        public decimal withholdingTax;
+        public decimal interest;
+        public decimal commissions;
+        public decimal realized;
+        public decimal endingValue;
+        public decimal timeWeightedReturn;
+
+        static public ChangeInNAV Parse(string line)
+        {
+            string[] elements = Utils.SplitRow(line);
+
+            var changeInNAV = new ChangeInNAV();
+
+            changeInNAV.fromDate = Utils.Trim(elements[0]);
+            changeInNAV.toDate = Utils.Trim(elements[1]);
+            changeInNAV.startingValue = decimal.Parse(Utils.Trim(elements[2]));
+            changeInNAV.markToMarket = decimal.Parse(Utils.Trim(elements[3]));
+            changeInNAV.depositsWithdrawals = decimal.Parse(Utils.Trim(elements[4]));
+            changeInNAV.grantActivity = decimal.Parse(Utils.Trim(elements[5]));
+            changeInNAV.dividends = decimal.Parse(Utils.Trim(elements[6]));
+            changeInNAV.withholdingTax = decimal.Parse(Utils.Trim(elements[7]));
+            changeInNAV.interest = decimal.Parse(Utils.Trim(elements[8]));
+            changeInNAV.commissions = decimal.Parse(Utils.Trim(elements[9]));
+            changeInNAV.realized = decimal.Parse(Utils.Trim(elements[10]));
+            changeInNAV.endingValue = decimal.Parse(Utils.Trim(elements[11]));
+            changeInNAV.timeWeightedReturn = decimal.Parse(Utils.Trim(elements[12]));
+
+            return changeInNAV;
+        }
+    }
+
     public class Position
     {
         public string symbol;
@@ -145,11 +185,35 @@ namespace InteractiveBrokers
         }
     }
 
+    public class GrantActivity
+    {
+        public string symbol;
+        public string vestingDate;
+        public decimal quantity;
+        public decimal price;
+        public decimal value;
+
+        static public GrantActivity Parse(string line)
+        {
+            string[] elements = Utils.SplitRow(line);
+
+            var grantActivity = new GrantActivity();
+
+            grantActivity.symbol = Utils.Trim(elements[0]);
+            grantActivity.vestingDate = Utils.Trim(elements[2]);
+            grantActivity.quantity = decimal.Parse(Utils.Trim(elements[3]));
+            grantActivity.price = decimal.Parse(Utils.Trim(elements[4]));
+            grantActivity.value = decimal.Parse(Utils.Trim(elements[5]));
+
+            return grantActivity;
+        }
+    }
+
     public class CashTransaction
     {
         public string symbol;
         public string dateTime;
-        public string type; // "Withholding Tax", "Dividends", "Payment In Lieu Of Dividends"
+        public string type; // "Withholding Tax", "Dividends", "Payment In Lieu Of Dividends", "Deposits/Withdrawals", "Broker Interest Received"
         public decimal amount;
         public string currency;
         public string description;
@@ -203,25 +267,47 @@ namespace InteractiveBrokers
 
     public class ActivityReport
     {
+        public ChangeInNAV changeInNAV;
         public List<Position> openPositions;
         public List<Trade> trades;
         public List<CorporateAction> corporateActions;
+        public List<GrantActivity> grants;
         public List<CashTransaction> cashTransactions;
         public List<Transfer> transfers;
-        // TODO List<DepositWithdrawal> DepositsWithdrawals;
 
         public ActivityReport(
+            ChangeInNAV changeInNAV,
             List<Position> openPositions,
             List<Trade> trades,
             List<CorporateAction> corporateActions,
+            List<GrantActivity> grants,
             List<CashTransaction> cashTransactions,
             List<Transfer> transfers)
         {
+            this.changeInNAV = changeInNAV;
             this.openPositions = openPositions;
             this.trades = trades;
             this.corporateActions = corporateActions;
+            this.grants = grants;
             this.cashTransactions = cashTransactions;
             this.transfers = transfers;
+        }
+
+        public void WriteChangeInNAV()
+        {
+            Console.WriteLine("fromDate             : {0}", changeInNAV.fromDate);
+            Console.WriteLine("toDate               : {0}", changeInNAV.toDate);
+            Console.WriteLine("startingValue        : {0:F2} USD", changeInNAV.startingValue);
+            Console.WriteLine("markToMarket         : {0:F2} USD", changeInNAV.markToMarket);
+            Console.WriteLine("depositsWithdrawals  : {0:F2} USD", changeInNAV.depositsWithdrawals);
+            Console.WriteLine("grantActivity        : {0:F2} USD", changeInNAV.grantActivity);
+            Console.WriteLine("dividends            : {0:F2} USD", changeInNAV.dividends);
+            Console.WriteLine("withholdingTax       : {0:F2} USD", changeInNAV.withholdingTax);
+            Console.WriteLine("interest             : {0:F2} USD", changeInNAV.interest);
+            Console.WriteLine("commissions          : {0:F2} USD", changeInNAV.commissions);
+            Console.WriteLine("realized             : {0:F2} USD", changeInNAV.realized);
+            Console.WriteLine("endingValue          : {0:F2} USD", changeInNAV.endingValue);
+            Console.WriteLine("timeWeightedReturn   : {0:F2} %", changeInNAV.timeWeightedReturn);
         }
 
         public void WriteOpenPositions()
@@ -234,8 +320,7 @@ namespace InteractiveBrokers
 
         public static List<Position> ExtractPositions(string filePath)
         {
-            Console.WriteLine();
-            Console.WriteLine("EXTRACTING initial positions from Activity Report: " + filePath);
+            Console.WriteLine("EXTRACTING StartPeriodPositions from Activity Report: " + filePath);
 
             ActivityReport report = ActivityReport.Import(filePath, true);
             return report.openPositions;
@@ -251,76 +336,92 @@ namespace InteractiveBrokers
         {
             if (!askTotalCostDKK)
             {
-                Console.WriteLine();
                 Console.WriteLine("IMPORTING IBKR Activity Report: " + filePath);
             }
 
-            // TODO maybe the FIFO CostBasisPrice for reference, but can get rid of OpenPrice?
-            const string PositionsSectionHeader = "\"Symbol\",\"ISIN\",\"Quantity\",\"CostBasisPrice\",\"OpenPrice\",\"PositionValue\"";
-            // TODO can remove Buy/Sell, CurrencyPrimary, IBCommissionCurrency. 
-            // TODO Can keep Proceeds maybe for consistency-check?
+            // IBKR Activity Report section headers
+            const string ChangeInNAVHeader              = "\"FromDate\",\"ToDate\",\"StartingValue\",\"Mtm\",\"DepositsWithdrawals\",\"GrantActivity\",\"Dividends\",\"WithholdingTax\",\"Interest\",\"Commissions\",\"Realized\",\"EndingValue\",\"TWR\"";
+            const string PositionsSectionHeader         = "\"Symbol\",\"ISIN\",\"Quantity\",\"CostBasisPrice\",\"OpenPrice\",\"PositionValue\"";
             const string TradesSectionHeader            = "\"Symbol\",\"ISIN\",\"DateTime\",\"Buy/Sell\",\"Quantity\",\"TradePrice\",\"CurrencyPrimary\",\"Proceeds\",\"IBCommission\",\"IBCommissionCurrency\"";
             const string CorporateActionsSectionHeader  = "\"Symbol\",\"ISIN\",\"Date/Time\",\"Type\",\"Description\",\"Quantity\"";
+            const string GrantActivityHeader            = "\"Symbol\",\"ISIN\",\"VestingDate\",\"Quantity\",\"Price\",\"Value\"";
             const string CashTransactionsSectionHeader  = "\"Symbol\",\"ISIN\",\"Date/Time\",\"Type\",\"Amount\",\"CurrencyPrimary\",\"Description\"";
             const string TransfersSectionHeader         = "\"Symbol\",\"ISIN\",\"DateTime\",\"Type\",\"Quantity\",\"Direction\",\"CostBasis\",\"TransferPrice\",\"Description\"";
 
             string[] lines = File.ReadAllLines(filePath);
 
-            int indexPositionsSection           = -1;
-            int indexTradesSection              = -1;
-            int indexCorporateActionsSection    = -1;
-            int indexCashTransactionsSection    = -1;
-            int indexTransfersSection           = -1;
+            int changeInNAVSectionIndex         = -1;
+            int positionsSectionIndex           = -1;
+            int tradesSectionIndex              = -1;
+            int corporateActionsSectionIndex    = -1;
+            int grantActivitySectionIndex       = -1;
+            int cashTransactionsSectionIndex    = -1;
+            int transfersSectionIndex           = -1;
 
             for (int i = 0; i < lines.Length; i++)
             {
-                if (lines[i].IndexOf(PositionsSectionHeader) == 0)          indexPositionsSection = i;
-                if (lines[i].IndexOf(TradesSectionHeader) == 0)             indexTradesSection = i;
-                if (lines[i].IndexOf(CorporateActionsSectionHeader) == 0)   indexCorporateActionsSection = i;
-                if (lines[i].IndexOf(CashTransactionsSectionHeader) == 0)   indexCashTransactionsSection = i;
-                if (lines[i].IndexOf(TransfersSectionHeader) == 0)          indexTransfersSection = i;
+                if (lines[i].IndexOf(ChangeInNAVHeader) == 0)               changeInNAVSectionIndex = i;
+                if (lines[i].IndexOf(PositionsSectionHeader) == 0)          positionsSectionIndex = i;
+                if (lines[i].IndexOf(TradesSectionHeader) == 0)             tradesSectionIndex = i;
+                if (lines[i].IndexOf(CorporateActionsSectionHeader) == 0)   corporateActionsSectionIndex = i;
+                if (lines[i].IndexOf(GrantActivityHeader) == 0)             grantActivitySectionIndex = i;
+                if (lines[i].IndexOf(CashTransactionsSectionHeader) == 0)   cashTransactionsSectionIndex = i;
+                if (lines[i].IndexOf(TransfersSectionHeader) == 0)          transfersSectionIndex = i;
             }
 
-            Trace.Assert(indexPositionsSection == 0);
-            Trace.Assert(indexTradesSection > indexPositionsSection);
-            Trace.Assert(indexCorporateActionsSection > indexTradesSection);
-            Trace.Assert(indexCashTransactionsSection > indexCorporateActionsSection);
-            Trace.Assert(indexTransfersSection > indexCashTransactionsSection);
+            // TODO turn into user errors
+            Trace.Assert(changeInNAVSectionIndex == 0);
+            Trace.Assert(positionsSectionIndex > changeInNAVSectionIndex);
+            Trace.Assert(tradesSectionIndex > positionsSectionIndex);
+            Trace.Assert(corporateActionsSectionIndex > tradesSectionIndex);
+            Trace.Assert(grantActivitySectionIndex > corporateActionsSectionIndex);
+            Trace.Assert(cashTransactionsSectionIndex > grantActivitySectionIndex);
+            Trace.Assert(transfersSectionIndex > cashTransactionsSectionIndex);
+
+            var changeInNAV = ChangeInNAV.Parse(lines[changeInNAVSectionIndex+1]);
 
             var positions = new List<Position>();
-            for (int i = indexPositionsSection + 1; i < indexTradesSection; i++)
+            for (int i = positionsSectionIndex + 1; i < tradesSectionIndex; i++)
             {
                 positions.Add(Position.Parse(lines[i], askTotalCostDKK));
             }
 
             var trades = new List<Trade>();
-            for (int i = indexTradesSection + 1; i < indexCorporateActionsSection; i++)
+            for (int i = tradesSectionIndex + 1; i < corporateActionsSectionIndex; i++)
             {
                 trades.Add(Trade.Parse(lines[i]));
             }
 
             var corporateActions = new List<CorporateAction>();
-            for (int i = indexCorporateActionsSection + 1; i < indexCashTransactionsSection; i++)
+            for (int i = corporateActionsSectionIndex + 1; i < grantActivitySectionIndex; i++)
             {
                 corporateActions.Add(CorporateAction.Parse(lines[i]));
             }
 
+            var grants = new List<GrantActivity>();
+            for (int i = grantActivitySectionIndex + 1; i < cashTransactionsSectionIndex; i++)
+            {
+                grants.Add(GrantActivity.Parse(lines[i]));
+            }
+
             var cashTransactions = new List<CashTransaction>();
-            for (int i = indexCashTransactionsSection + 1; i < indexTransfersSection; i++)
+            for (int i = cashTransactionsSectionIndex + 1; i < transfersSectionIndex; i++)
             {
                 cashTransactions.Add(CashTransaction.Parse(lines[i]));
             }
 
             var transfers = new List<Transfer>();
-            for (int i = indexTransfersSection + 1; i < lines.Length; i++)
+            for (int i = transfersSectionIndex + 1; i < lines.Length; i++)
             {
                 transfers.Add(Transfer.Parse(lines[i]));
             }
 
             return new ActivityReport(
+                changeInNAV,
                 positions,
                 trades,
                 corporateActions,
+                grants,
                 cashTransactions,
                 transfers
             );
