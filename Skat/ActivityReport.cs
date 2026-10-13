@@ -70,6 +70,7 @@ namespace InteractiveBrokers
         public decimal totalCostUSD; // This is initially coming from the OpenPositions of the previousActivityReport (if any).
         public decimal totalCostDKK; // This should somehow be inserted manually because it depends on the DKK-USD rates, which are generally unknown.
         // public decimal averageCostDKK; // This is gennemsnitsmetoden: averageCostDKK = totalCostDKK / quantity;
+        public decimal positionValue;
 
         static public Position Parse(string line)
         {
@@ -86,10 +87,10 @@ namespace InteractiveBrokers
             position.quantity = decimal.Parse(Utils.Trim(elements[2]));
 
             decimal costBasisPrice = decimal.Parse(Utils.Trim(elements[3])); // This is the averagePricePerShare.
-            decimal openPrice = decimal.Parse(Utils.Trim(elements[4])); // TODO maybe not needed as it looks generally the same as the costBasisPrice
-            decimal positionValue = decimal.Parse(Utils.Trim(elements[5])); // This is maybe the position value today: todaysPrice * quantity 
-
+            // decimal openPrice = decimal.Parse(Utils.Trim(elements[4])); // TODO maybe not needed as it looks generally the same as the costBasisPrice
+    
             position.totalCostUSD = costBasisPrice * position.quantity;
+            position.positionValue = decimal.Parse(Utils.Trim(elements[5])); // This is the end-year position value today (endYearPrice * quantity) 
 
             bool isTotalCostDKKPresent = elements.Length > 6;
             if (isTotalCostDKKPresent)
@@ -125,7 +126,7 @@ namespace InteractiveBrokers
             string USD = "USD".PadRight(8);
             string DKK = "DKK".PadRight(8);
 
-            return string.Format("{0} {1} {2} {3} {4} {5}", symbol, quantity, totalCostUSD, USD, totalCostDKK, DKK);
+            return string.Format("{0} {1} {2} {3} {4} {5} (value {6} USD)", symbol, quantity, totalCostUSD, USD, totalCostDKK, DKK, positionValue, USD);
         }
     }
 
@@ -318,9 +319,19 @@ namespace InteractiveBrokers
             }
         }
 
+        public decimal GetOpenPositionsValue()
+        {
+            decimal totalValue = 0;
+            foreach (Position position in this.openPositions)
+            {
+                totalValue += position.positionValue;
+            }
+            return totalValue;
+        }
+
         public static List<Position> ExtractPositions(string filePath)
         {
-            Console.WriteLine("EXTRACTING StartPeriodPositions from Activity Report: " + filePath);
+            Console.WriteLine("EXTRACTING StartPeriodPositions (from previous activity report): " + filePath);
 
             ActivityReport report = ActivityReport.Import(filePath, true);
             return report.openPositions;
@@ -336,7 +347,7 @@ namespace InteractiveBrokers
         {
             if (!askTotalCostDKK)
             {
-                Console.WriteLine("IMPORTING IBKR Activity Report: " + filePath);
+                Console.WriteLine("IMPORTING current activity report: " + filePath);
             }
 
             // IBKR Activity Report section headers

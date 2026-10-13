@@ -9,6 +9,24 @@ using InteractiveBrokers;
 using Nationalbanken;
 using TaxEngine;
 
+/***
+ * Purpose: 
+ * - Replay the trading activity over an initial position pool to compute gains, 
+ *   dividends, interest, etc., under SKAT's average method (gennemsnitsmetoden), 
+ *   applying daily USD/DKK exchange rates.
+ * - Work with data from multiple accounts combined.
+ * 
+ * Inputs
+ * - USD/DKK Rates: daily rates from Danmarks Nationalbank.
+ * - Initial Positions: a merge of prior-period end positions from all accounts.
+ * - Trading Activity: a merge of current-period trading events from all accounts.
+ * 
+ * Outputs
+ * - Tax Report: final calculated figures for SKAT filing.
+ * - Closing Positions: end-of-period holdings and total portfolio valuation.
+ * 
+ ***/
+
 
 namespace LedgerToTax
 {
@@ -16,19 +34,20 @@ namespace LedgerToTax
     {
         static void Main(string[] args)
         {
-            // ====================================
-            // Input
-            // ====================================
-
             const bool WriteEventSequence = true;
             const bool WriteRealizedGainsList = false;
 
+
+            Console.WriteLine();
+            Console.WriteLine("===================================================================");
+            Console.WriteLine("INPUT");
+            Console.WriteLine("===================================================================");
 
             const string Depot = "C:\\Users\\Admin\\Downloads\\";
 
             // HOW: https://www.nationalbanken.dk/en => Exchange Rates => US dollars => Download Excel
             var fxRates = FxRates.Import2(Depot + "nationalbanken_2010-2026-10-08_USD.csv");
-            var startPeriodPositions = ActivityReport.ExtractPositions(Depot + "IBKR_2022_Schwab.csv");
+            var startPeriodPositions = ActivityReport.ExtractPositions(Depot + "Schwab_2022.csv");
             var currentActivityReport = ActivityReport.Import(Depot + "IBKR_2023.csv");
 
 
@@ -63,27 +82,26 @@ namespace LedgerToTax
                 events.Add(Event.FromCashTransaction(cashTransaction, fxRates));
             }
 
-            // TODO: Deposits & Withdrawals
-            // TODO: Interest
-
-            //
-            // Process events in order by date
-            //
 
             TaxReport report = new TaxReport(startPeriodPositions);
 
             Console.WriteLine();
-            Console.WriteLine("Start Period Positions");
+            Console.WriteLine("StartPeriodPositions (from previous period activity report)");
             Console.WriteLine("===================================================================");
             report.WritePositions();
+
+            Console.WriteLine();
+            Console.WriteLine("===================================================================");
+            Console.WriteLine("CALCULATION (apply current period Events over StartPeriodPositions)");
+            Console.WriteLine("===================================================================");
 
             events.Sort(delegate(Event a, Event b) { return a.dateTime.CompareTo(b.dateTime); });
 
             if (WriteEventSequence)
             {
                 Console.WriteLine();
-                Console.WriteLine("Pooling Events");
-                Console.WriteLine("===================================================================");
+                Console.WriteLine("Events Sequence");
+                Console.WriteLine("===============");
             }
 
             foreach (Event evt in events)
@@ -263,38 +281,57 @@ namespace LedgerToTax
             }
 
 
+            Console.WriteLine();
+            Console.WriteLine("===================================================================");
+            Console.WriteLine("OUTPUT (Tax Report, figures for SKAT, EndPeriodPositions)");
+            Console.WriteLine("===================================================================");
+            /*
+            report.yearEndPorfolioValueUSD = currentActivityReport.GetOpenPositionsValue();
+
+            string endYearDate = currentActivityReport.changeInNAV.toDate;
+            decimal? endYearRate = fxRates.GetRate(endYearDate);
+            report.yearEndPorfolioValueDKK = endYearRate.Value * report.yearEndPorfolioValueUSD;
+            */
 
             Console.WriteLine();
-            Console.WriteLine("Tax Report");
-            Console.WriteLine("======================================================");
+            Console.WriteLine("Tax Report (CALCULATED)");
+            Console.WriteLine("=======================");
             Console.WriteLine("totalInterest                     : {0:F2} USD", report.totalInterestUSD);
             Console.WriteLine("totalInterestExpense              : {0:F2} USD", report.totalInterestExpenseUSD);
             Console.WriteLine("totalDividends                    : {0:F2} USD", report.totalDividendsUSD);
             Console.WriteLine("totalGainLoss                     : {0:F2} USD", report.totalGainLossUSD);
             Console.WriteLine("totalWithholdingTax               : {0:F2} USD", report.totalWithholdingTaxUSD); 
             Console.WriteLine("totalCommissions                  : {0:F2} USD", report.totalCommissionsUSD);
-            Console.WriteLine("yearEndPorfolioValue              : {0:F2} USD", report.yearEndPorfolioValueUSD);
+            Console.WriteLine("yearEndPorfolioValue              : (*)");
+            Console.WriteLine("yearEndCash                       : (*)");
+            Console.WriteLine("netFXGainLossFIFO                 : ---");
             Console.WriteLine("totalDepositsWithdrawals          : {0:F2} USD", report.totalDepositsWithdrawalsUSD);
 
             Console.WriteLine();
-            Console.WriteLine("Tax Report (for SKAT)");
-            Console.WriteLine("======================================================");
+            Console.WriteLine("Figures for SKAT (CALCULATED)");
+            Console.WriteLine("=============================");
             Console.WriteLine("totalInterest        (Rubrik 431) : {0:F2} DKK", report.totalInterestDKK);
             Console.WriteLine("totalInterestExpense (Rubrik 432) : {0:F2} DKK", report.totalInterestExpenseDKK);
             Console.WriteLine("totalDividends       (Rubrik 452) : {0:F2} DKK", report.totalDividendsDKK);
             Console.WriteLine("totalGainLoss        (Rubrik 454) : {0:F2} DKK", report.totalGainLossDKK);
             Console.WriteLine("totalWithholdingTax  (Rubrik 496) : {0:F2} DKK", report.totalWithholdingTaxDKK);
             Console.WriteLine("totalCommissions                  : {0:F2} DKK", report.totalCommissionsDKK);
-            Console.WriteLine("yearEndPorfolioValue (Rubrik 490) : {0:F2} DKK", report.yearEndPorfolioValueDKK);
+            Console.WriteLine("yearEndPorfolioValue (Rubrik 490) : (*)");
+            Console.WriteLine("yearEndCash          (Rubrik 492) : (*)");
+            Console.WriteLine("netFXGainLossFIFO    (Rubrik 434) : (*)");
             Console.WriteLine("totalDepositsWithdrawals          : {0:F2} DKK", report.totalDepositsWithdrawalsDKK);
 
+            Console.WriteLine();
+            Console.WriteLine("(*) Values to be calculated manually from the End Period Positions (calculated) below.");
+            Console.WriteLine("    You will need to pick the end-year prices, calculate position values, in USD and DKK, and totals.");
 
             Console.WriteLine();
-            Console.WriteLine("End Period Positions (calculated from StartPeriodPositions and Events)");
-            Console.WriteLine("===================================================================");
+            Console.WriteLine("End Period Positions (CALCULATED)");
+            Console.WriteLine("=================================");
             report.WritePositions();
-            Console.WriteLine();
-            Console.WriteLine("NOTE: The totalCostDKK values above have to be copied MANUALLY in the StartPeriodPositions of next period.");
+            // Acceptance Criteria:
+            // - only because no Unity share was sold with IBKR, 
+            // - this EndPeriodPositions should be a merge of the two lists (StartPeriodPositions + currentActivityReport.positions)
 
             if (WriteRealizedGainsList)
             {
@@ -302,13 +339,18 @@ namespace LedgerToTax
             }
 
             Console.WriteLine();
-            Console.WriteLine("End Period Positions (from given IBKR Activity Report)");
-            Console.WriteLine("===================================================================");
+            Console.WriteLine("================================================================================");
+            Console.WriteLine("VERIFICATION: compare with activity reports' EndPeriodPositions and ChangeInNAV.");
+            Console.WriteLine("================================================================================");
+
+            Console.WriteLine();
+            Console.WriteLine("End Period Positions (from the input activity reports)");
+            Console.WriteLine("======================================================");
             currentActivityReport.WriteOpenPositions();
 
             Console.WriteLine();
-            Console.WriteLine("Change in NAV (from given IBKR Activity Report)");
-            Console.WriteLine("===================================================================");
+            Console.WriteLine("Change in NAV        (from the input activity reports)");
+            Console.WriteLine("======================================================");
             currentActivityReport.WriteChangeInNAV();
 
             Console.WriteLine();

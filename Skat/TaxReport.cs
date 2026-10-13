@@ -37,6 +37,7 @@ namespace TaxEngine
         public decimal totalWithholdingTaxUSD;
         public decimal totalCommissionsUSD;
         public decimal yearEndPorfolioValueUSD;     // Market value of all shares at the End-Year.
+        public decimal yearEndCashUSD;              // Uninvested cash
         public decimal totalDepositsWithdrawalsUSD;
 
         // For reporting to SKAT
@@ -47,6 +48,8 @@ namespace TaxEngine
         public decimal totalWithholdingTaxDKK;      // Rubrik 496: Foreign Withholding Tax Paid
         public decimal totalCommissionsDKK;         //
         public decimal yearEndPorfolioValueDKK;     // Rubrik 490: Market value of all shares at the End-Year (in DKK)
+        public decimal yearEndCashDKK;              // Rubrik 492: Uninvested cash converted from USD to DKK (end-year rate)
+        public decimal netFXGainLossFIFO;           // Rubrik 434: FIFO GainLoss when withdrawing cash (if greater than +/-2000 DKK).
         public decimal totalDepositsWithdrawalsDKK; //
         // TODO Rubrik 493. If you owe IBKR money at year end
 

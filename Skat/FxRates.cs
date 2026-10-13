@@ -95,7 +95,7 @@ namespace Nationalbanken
 
         public static FxRates Import2(string filePath)
         {
-            Console.WriteLine("IMPORTING Nationalbanken USD-DKK Rates: " + filePath);
+            Console.WriteLine("IMPORTING USD-DKK Rates (Nationalbanken): " + filePath);
 
             var dictionary = new Dictionary<string, decimal>();
 
