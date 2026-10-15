@@ -144,6 +144,43 @@ namespace TaxEngine
             this.splitRatio = splitRatio;
         }
 
+        public static List<Event> FromActivityReport(ActivityReport activityReport, FxRates fxRates)
+        {
+            var events = new List<Event>();
+
+            foreach (var trade in activityReport.trades)
+            {
+                events.Add(Event.FromTrade(trade, fxRates));
+            }
+
+            foreach (var transfer in activityReport.transfers)
+            {
+                events.Add(Event.FromTransfer(transfer, fxRates));
+            }
+
+            foreach (var corporateAction in activityReport.corporateActions)
+            {
+                events.Add(Event.FromCorporateAction(corporateAction, fxRates));
+            }
+            /* 
+            foreach (var grant in activityReport.grants)
+            {
+                events.Add(Event.FromGrantActivity(grant, fxRates));
+            }
+            */
+            foreach (var cashTransaction in activityReport.cashTransactions)
+            {
+                events.Add(Event.FromCashTransaction(cashTransaction, fxRates));
+            }
+
+            events = events 
+                .OrderBy(e => e.dateTime)
+                .ThenBy(e => e.quantity > 0 ? 0 : 1) // acquisitions first at the same timestamp
+                .ToList();
+
+            return events;
+        }
+
         public static Event FromTrade(Trade trade, FxRates fxRates)
         {
             Trace.Assert(trade.quantity != 0);
@@ -234,7 +271,7 @@ namespace TaxEngine
 
             return evt;     
         }
-
+/*
         public static Event FromGrantActivity(GrantActivity grantActivity, FxRates fxRates)
         {
             Trace.Assert(grantActivity.value != 0);
@@ -254,7 +291,7 @@ namespace TaxEngine
 
             return evt;
         }
-        
+  */      
         public static Event FromCashTransaction(CashTransaction cashTransaction, FxRates fxRates)
         {
             Trace.Assert(cashTransaction.amount != 0);

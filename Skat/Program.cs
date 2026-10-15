@@ -34,7 +34,7 @@ namespace LedgerToTax
     {
         static void Main(string[] args)
         {
-            const bool WriteEventSequence = true;
+            const bool WriteEventSequence = false;
             const bool WriteRealizedGainsList = false;
 
 
@@ -47,58 +47,36 @@ namespace LedgerToTax
 
             // HOW: https://www.nationalbanken.dk/en => Exchange Rates => US dollars => Download Excel
             var fxRates = FxRates.Import2(Depot + "nationalbanken_2010-2026-10-08_USD.csv");
+            
+            // 2023
             var startPeriodPositions = ActivityReport.ExtractPositions(Depot + "Schwab_2022.csv");
             var currentActivityReport = ActivityReport.Import(Depot + "IBKR_2023.csv");
+
+            // 2024
+            //var startPeriodPositions = ActivityReport.ExtractPositions(Depot + "IBKR_2023.csv");
+            //var currentActivityReport = ActivityReport.Import(Depot + "IBKR_2024.csv");
 
 
             // ====================================
             // Convert into dated events
             // ====================================
 
-            var events = new List<Event>();
-            
-            foreach (var trade in currentActivityReport.trades)
-            {
-                events.Add(Event.FromTrade(trade, fxRates));
-            }
-            
-            foreach (var transfer in currentActivityReport.transfers)
-            {
-                events.Add(Event.FromTransfer(transfer, fxRates));
-            }
-
-            foreach (var corporateAction in currentActivityReport.corporateActions)
-            {
-                events.Add(Event.FromCorporateAction(corporateAction, fxRates));
-            }
-
-            foreach (var grant in currentActivityReport.grants)
-            {
-                events.Add(Event.FromGrantActivity(grant, fxRates));
-            }
-
-            foreach (var cashTransaction in currentActivityReport.cashTransactions)
-            {
-                events.Add(Event.FromCashTransaction(cashTransaction, fxRates));
-            }
-
+            var events = Event.FromActivityReport(currentActivityReport, fxRates);
 
             TaxReport report = new TaxReport(startPeriodPositions);
 
             Console.WriteLine();
             Console.WriteLine("StartPeriodPositions (from previous period activity report)");
-            Console.WriteLine("===================================================================");
+            Console.WriteLine("==================================================================================");
             report.WritePositions();
-
-            Console.WriteLine();
-            Console.WriteLine("===================================================================");
-            Console.WriteLine("CALCULATION (apply current period Events over StartPeriodPositions)");
-            Console.WriteLine("===================================================================");
-
-            events.Sort(delegate(Event a, Event b) { return a.dateTime.CompareTo(b.dateTime); });
 
             if (WriteEventSequence)
             {
+                Console.WriteLine();
+                Console.WriteLine("===================================================================");
+                Console.WriteLine("CALCULATION (apply current period Events over StartPeriodPositions)");
+                Console.WriteLine("===================================================================");
+
                 Console.WriteLine();
                 Console.WriteLine("Events Sequence");
                 Console.WriteLine("===============");
@@ -173,7 +151,7 @@ namespace LedgerToTax
                         }
                         else // SELL
                         {
-                            Precondition.Check(position.quantity > 0);
+                            Precondition.Check(position.quantity > 0, "Selling implies quantity should be positive");
 
                             decimal averageCostUSD = position.quantity == 0 ? 0m : position.totalCostUSD / position.quantity;
                             decimal averageCostDKK = position.quantity == 0 ? 0m : position.totalCostDKK / position.quantity;
@@ -195,9 +173,8 @@ namespace LedgerToTax
                             position.totalCostUSD -= costOfSoldUSD;
                             position.totalCostDKK -= costOfSoldDKK;
 
-                            if (position.quantity < 1)
+                            if (position.quantity < 0.001m)
                             {
-                                Precondition.Check(position.quantity == 0);
                                 report.positions.Remove(evt.symbol);
                             }
 
@@ -207,7 +184,7 @@ namespace LedgerToTax
                         break;
 
                     case EventType.Split:
-                        Precondition.Check(position.quantity > 0);
+                        Precondition.Check(position.quantity > 0, "Split should happen with quantity > 0");
                         position.quantity += evt.quantity; // total cost unchanged
                         break;
 
@@ -221,7 +198,7 @@ namespace LedgerToTax
                         }
                         else
                         {
-                            Precondition.Check(position.quantity > 0);
+                            Precondition.Check(position.quantity > 0, "Transfer out should happen with quantity > 0");
 
                             decimal averageCostUSD = position.quantity == 0 ? 0m : position.totalCostUSD / position.quantity;
                             decimal averageCostDKK = position.quantity == 0 ? 0m : position.totalCostDKK / position.quantity;
@@ -235,17 +212,16 @@ namespace LedgerToTax
                             position.totalCostUSD -= costOfTransferedUSD;
                             position.totalCostDKK -= costOfTransferedDKK;
 
-                            if (position.quantity < 1)
+                            if (position.quantity < 0.001m)
                             {
-                                Precondition.Check(position.quantity == 0);
                                 report.positions.Remove(evt.symbol);
                             }
                         }
                         break;
 
                     case EventType.ReturnOfCapital:
-                        Precondition.Check(position.quantity > 0);
-                        Precondition.Check(position.totalCostDKK > 0);
+                        Precondition.Check(position.quantity > 0, "ReturnOfCapital implies quantity > 0");
+                        Precondition.Check(position.totalCostDKK > 0, "ReturnOfCapital implies totalCostDKK > 0");
 
                         // The company handing you back a piece of your own original investment, not profit.
                         // But if the capital returned is more than what you invested, then it is a profit (gain).
@@ -256,9 +232,6 @@ namespace LedgerToTax
                         {
                             decimal realizedGainUSD =                 evt.amount - position.totalCostUSD;
                             decimal realizedGainDKK = evt.dailyRate * evt.amount - position.totalCostDKK;
-
-                            Precondition.Check(realizedGainUSD > 0);
-                            Precondition.Check(realizedGainDKK > 0);
 
                             RealizedGain gain = new RealizedGain(evt.symbol, realizedGainDKK, evt.dateTime);
                             report.realizedGainsDKK.Add(gain);
@@ -280,12 +253,12 @@ namespace LedgerToTax
                 }
             }
 
-
+/*
             Console.WriteLine();
             Console.WriteLine("===================================================================");
             Console.WriteLine("OUTPUT (Tax Report, figures for SKAT, EndPeriodPositions)");
             Console.WriteLine("===================================================================");
-            /*
+            
             report.yearEndPorfolioValueUSD = currentActivityReport.GetOpenPositionsValue();
 
             string endYearDate = currentActivityReport.changeInNAV.toDate;
@@ -293,66 +266,75 @@ namespace LedgerToTax
             report.yearEndPorfolioValueDKK = endYearRate.Value * report.yearEndPorfolioValueUSD;
             */
 
-            Console.WriteLine();
-            Console.WriteLine("Tax Report (CALCULATED)");
-            Console.WriteLine("=======================");
-            Console.WriteLine("totalInterest                     : {0:F2} USD", report.totalInterestUSD);
-            Console.WriteLine("totalInterestExpense              : {0:F2} USD", report.totalInterestExpenseUSD);
-            Console.WriteLine("totalDividends                    : {0:F2} USD", report.totalDividendsUSD);
-            Console.WriteLine("totalGainLoss                     : {0:F2} USD", report.totalGainLossUSD);
-            Console.WriteLine("totalWithholdingTax               : {0:F2} USD", report.totalWithholdingTaxUSD); 
-            Console.WriteLine("totalCommissions                  : {0:F2} USD", report.totalCommissionsUSD);
-            Console.WriteLine("yearEndPorfolioValue              : (*)");
-            Console.WriteLine("yearEndCash                       : (*)");
-            Console.WriteLine("netFXGainLossFIFO                 : ---");
-            Console.WriteLine("totalDepositsWithdrawals          : {0:F2} USD", report.totalDepositsWithdrawalsUSD);
-
-            Console.WriteLine();
-            Console.WriteLine("Figures for SKAT (CALCULATED)");
-            Console.WriteLine("=============================");
-            Console.WriteLine("totalInterest        (Rubrik 431) : {0:F2} DKK", report.totalInterestDKK);
-            Console.WriteLine("totalInterestExpense (Rubrik 432) : {0:F2} DKK", report.totalInterestExpenseDKK);
-            Console.WriteLine("totalDividends       (Rubrik 452) : {0:F2} DKK", report.totalDividendsDKK);
-            Console.WriteLine("totalGainLoss        (Rubrik 454) : {0:F2} DKK", report.totalGainLossDKK);
-            Console.WriteLine("totalWithholdingTax  (Rubrik 496) : {0:F2} DKK", report.totalWithholdingTaxDKK);
-            Console.WriteLine("totalCommissions                  : {0:F2} DKK", report.totalCommissionsDKK);
-            Console.WriteLine("yearEndPorfolioValue (Rubrik 490) : (*)");
-            Console.WriteLine("yearEndCash          (Rubrik 492) : (*)");
-            Console.WriteLine("netFXGainLossFIFO    (Rubrik 434) : (*)");
-            Console.WriteLine("totalDepositsWithdrawals          : {0:F2} DKK", report.totalDepositsWithdrawalsDKK);
-
-            Console.WriteLine();
-            Console.WriteLine("(*) Values to be calculated manually from the End Period Positions (calculated) below.");
-            Console.WriteLine("    You will need to pick the end-year prices, calculate position values, in USD and DKK, and totals.");
-
-            Console.WriteLine();
-            Console.WriteLine("End Period Positions (CALCULATED)");
-            Console.WriteLine("=================================");
-            report.WritePositions();
-            // Acceptance Criteria:
-            // - only because no Unity share was sold with IBKR, 
-            // - this EndPeriodPositions should be a merge of the two lists (StartPeriodPositions + currentActivityReport.positions)
-
             if (WriteRealizedGainsList)
             {
                 // TODO TODO.WriteRealizedGains();
             }
 
+            
+            Func<decimal, string, string> formatAmount = (amount, currency) => string.Format("{0,14}", amount.ToString("F2") + " " + currency);
+            string DKK = "DKK", USD = "USD";
+            Func<decimal, string> formatDKK = amount => string.Format("{0,14}", amount.ToString("F2") + " " + DKK);
+            Func<decimal, string> formatUSD = amount => string.Format("{0,14}", amount.ToString("F2") + " " + USD);
+            Func<decimal, string> formatPercentage = amount => string.Format("{0,14}", amount.ToString("F2") + "%");
+
+            string totalInterestDKK = formatDKK(report.totalInterestDKK);
+            string totalInterestExpenseDKK = formatDKK(report.totalInterestExpenseDKK);
+            string totalDividendsDKK = formatDKK(report.totalDividendsDKK);
+            string totalGainLossDKK = formatDKK(report.totalGainLossDKK);
+            string totalWithholdingTaxDKK = formatDKK(report.totalWithholdingTaxDKK);
+            string totalCommissionsDKK = formatDKK(report.totalCommissionsDKK);
+            string totalDepositsWithdrawalsDKK = formatDKK(report.totalDepositsWithdrawalsDKK);
+
+            string totalInterestUSD = formatUSD(report.totalInterestUSD);
+            string totalInterestExpenseUSD = formatUSD(report.totalInterestExpenseUSD);
+            string totalDividendsUSD = formatUSD(report.totalDividendsUSD);
+            string totalGainLossUSD = formatUSD(report.totalGainLossUSD);
+            string totalWithholdingTaxUSD = formatUSD(report.totalWithholdingTaxUSD);
+            string totalCommissionsUSD = formatUSD(report.totalCommissionsUSD);
+            string totalDepositsWithdrawalsUSD = formatUSD(report.totalDepositsWithdrawalsUSD);
+
+            string changeInNAVInterest = formatUSD(currentActivityReport.changeInNAV.interest);
+            //string changeInNAVInterestExpense = string.Format("{0,15}", currentActivityReport.changeInNAV.totalInterestExpenseUSD.ToString("F2") + " USD");
+            string changeInNAVDividends = formatUSD(currentActivityReport.changeInNAV.dividends);
+            //string changeInNAVGainLoss = string.Format("{0,15}", currentActivityReport.changeInNAV.totalGainLossUSD.ToString("F2") + " USD");
+            string changeInNAVWithholdingTax = formatUSD(currentActivityReport.changeInNAV.withholdingTax);
+            string changeInNAVCommissions = formatUSD(currentActivityReport.changeInNAV.commissions);
+            string changeInNAVDepositsWithdrawals = formatUSD(currentActivityReport.changeInNAV.depositsWithdrawals);
+            string changeInNAVStartingValue = formatUSD(currentActivityReport.changeInNAV.startingValue);
+            string changeInNAVEndingValue = formatUSD(currentActivityReport.changeInNAV.endingValue);
+            string changeInNAVTimeWeightedReturn = formatPercentage(currentActivityReport.changeInNAV.timeWeightedReturn);
+  
             Console.WriteLine();
-            Console.WriteLine("================================================================================");
-            Console.WriteLine("VERIFICATION: compare with activity reports' EndPeriodPositions and ChangeInNAV.");
-            Console.WriteLine("================================================================================");
+            Console.WriteLine("Period: {0} / {1}        (CALCULATED)   (CALCULATED)  (ChangeInNav)", currentActivityReport.changeInNAV.fromDate, currentActivityReport.changeInNAV.toDate);
+            Console.WriteLine("==================================================================================");
+            Console.WriteLine("totalInterest        (Rubrik 431) : {0} {1} {2}", totalInterestDKK, totalInterestUSD, changeInNAVInterest);
+            Console.WriteLine("totalInterestExpense (Rubrik 432) : {0} {1} {2}", totalInterestExpenseDKK, totalInterestExpenseUSD, formatUSD(0));
+            Console.WriteLine("totalDividends       (Rubrik 452) : {0} {1} {2}", totalDividendsDKK, totalDividendsUSD, changeInNAVDividends);
+            Console.WriteLine("totalGainLoss        (Rubrik 454) : {0} {1} {2}", totalGainLossDKK, totalGainLossUSD, formatUSD(0));
+            Console.WriteLine("totalWithholdingTax  (Rubrik 496) : {0} {1} {2}", totalWithholdingTaxDKK, totalWithholdingTaxUSD, changeInNAVWithholdingTax);
+            Console.WriteLine("totalCommissions                  : {0} {1} {2}", totalCommissionsDKK, totalCommissionsUSD, changeInNAVCommissions);
+            Console.WriteLine("yearEndPorfolioValue (Rubrik 490) : ");
+            Console.WriteLine("yearEndCash          (Rubrik 492) : ");
+            Console.WriteLine("netFXGainLossFIFO    (Rubrik 434) : ");
+            Console.WriteLine("totalDepositsWithdrawals          : {0} {1} {2}", totalDepositsWithdrawalsDKK, totalDepositsWithdrawalsUSD, changeInNAVDepositsWithdrawals);
+            Console.WriteLine("startingValue                     : {0} {1} {2}", formatDKK(0), formatUSD(0), changeInNAVStartingValue);
+            Console.WriteLine("endingValue                       : {0} {1} {2}", formatDKK(0), formatUSD(0), changeInNAVEndingValue);
+            Console.WriteLine("timeWeightedReturn (TWR)          : {0} {1} {2}", formatPercentage(0), formatPercentage(0), changeInNAVTimeWeightedReturn);
 
             Console.WriteLine();
-            Console.WriteLine("End Period Positions (from the input activity reports)");
-            Console.WriteLine("======================================================");
+            Console.WriteLine("End Period Positions (CALCULATED compared with OpenPositions' activity report)");
+            Console.WriteLine("==================================================================================");
+            report.WritePositions();
+
+            Console.WriteLine();
             currentActivityReport.WriteOpenPositions();
-
+            /*
             Console.WriteLine();
             Console.WriteLine("Change in NAV        (from the input activity reports)");
             Console.WriteLine("======================================================");
             currentActivityReport.WriteChangeInNAV();
-
+            */
             Console.WriteLine();
             Console.WriteLine("PRESS ENTER");
             Console.ReadLine();
