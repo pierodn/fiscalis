@@ -47,7 +47,7 @@
   <ItemGroup>
     <Compile Include="FxRates.cs" />
     <Compile Include="Precondition.cs" />
-    <Compile Include="TaxReport.cs" />
+    <Compile Include="EventProcessor.cs" />
     <Compile Include="ActivityReport.cs" />
     <Compile Include="Program.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />

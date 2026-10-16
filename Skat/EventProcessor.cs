@@ -11,7 +11,7 @@ using Nationalbanken;
 using InteractiveBrokers;
 
 
-namespace TaxEngine
+namespace EventProcessor
 {
     public class RealizedGain
     {
@@ -80,6 +80,28 @@ namespace TaxEngine
             foreach (string key in keys)
             {
                 Console.WriteLine(this.positions[key]);
+            }
+
+            Console.SetOut(original); // restore
+        }
+
+        public static void WritePositions(List<Position> positions)
+        {
+            WritePositions(positions, Console.Out);
+        }
+
+        public static void WritePositions(List<Position> positions, TextWriter writer)
+        {
+            TextWriter original = Console.Out;
+            Console.SetOut(writer);
+
+            var positionsDic = positions.ToDictionary(p => p.symbol);
+
+            List<string> keys = new List<string>(positionsDic.Keys);
+            keys.Sort(StringComparer.Ordinal);
+            foreach (string key in keys)
+            {
+                Console.WriteLine(positionsDic[key]);
             }
 
             Console.SetOut(original); // restore
@@ -392,7 +414,187 @@ namespace TaxEngine
 
            return line;
         }
+
+        public static TaxReport Process(List<Position> positions, List<Event> events, bool WriteEventSequence)
+        {
+            TaxReport report = new TaxReport(positions);
+
+            foreach (Event evt in events)
+            {
+                if (WriteEventSequence)
+                {
+                    Console.WriteLine(evt);
+                }
+
+                if (evt.type == EventType.WithholdingTax)
+                {
+                    report.totalWithholdingTaxUSD += evt.amount;
+                    report.totalWithholdingTaxDKK += evt.dailyRate * evt.amount;
+                    continue;
+                }
+                else if (evt.type == EventType.Dividends)
+                {
+                    report.totalDividendsUSD += evt.amount;
+                    report.totalDividendsDKK += evt.dailyRate * evt.amount;
+                    continue;
+                }
+                else if (evt.type == EventType.Interest)
+                {
+                    bool isInterestExpense = (evt.amount < 0);
+                    if (isInterestExpense)
+                    {
+                        // This is negative, paid to broker normally when you have leverage
+                        report.totalInterestExpenseUSD += evt.amount;
+                        report.totalInterestExpenseDKK += evt.dailyRate * evt.amount;
+                    }
+                    else
+                    {
+                        // This is positive interested paid by broker
+                        report.totalInterestUSD += evt.amount;
+                        report.totalInterestDKK += evt.dailyRate * evt.amount;
+                    }
+                    continue;
+                }
+                else if (evt.type == EventType.DepositOrWithdrawal)
+                {
+                    report.totalDepositsWithdrawalsUSD += evt.amount;
+                    report.totalDepositsWithdrawalsDKK += evt.dailyRate * evt.amount;
+                    continue;
+                }
+
+
+                Position position;
+                if (!report.positions.TryGetValue(evt.symbol, out position))
+                {
+                    position = new Position();
+                    position.symbol = evt.symbol;
+                    report.positions[evt.symbol] = position;
+                }
+
+                switch (evt.type)
+                {
+                    // TODO Have EventType.Buy and EventType.Sell and positive quantity and amount
+                    // instead of EventType.Trade and positive/negative quantity and amount. 
+                    case EventType.Trade:
+                        Boolean IsBUY = evt.quantity > 0;
+                        if (IsBUY)
+                        {
+                            position.quantity += evt.quantity;
+                            position.totalCostUSD += -evt.amount;
+                            position.totalCostDKK += -evt.dailyRate * evt.amount;
+
+                            report.totalCommissionsUSD += evt.commission;
+                            report.totalCommissionsDKK += evt.dailyRate * evt.commission;
+                        }
+                        else // SELL
+                        {
+                            Precondition.Check(position.quantity > 0, "Selling implies quantity should be positive");
+
+                            decimal averageCostUSD = position.quantity == 0 ? 0m : position.totalCostUSD / position.quantity;
+                            decimal averageCostDKK = position.quantity == 0 ? 0m : position.totalCostDKK / position.quantity;
+
+                            decimal soldQuantity = -evt.quantity;
+                            decimal costOfSoldUSD = averageCostUSD * soldQuantity;
+                            decimal costOfSoldDKK = averageCostDKK * soldQuantity;
+
+                            decimal realizedGainUSD = evt.amount - costOfSoldUSD;
+                            decimal realizedGainDKK = evt.dailyRate * evt.amount - costOfSoldDKK;
+
+                            RealizedGain gain = new RealizedGain(evt.symbol, realizedGainDKK, evt.dateTime);
+                            report.realizedGainsDKK.Add(gain);
+
+                            report.totalGainLossUSD += realizedGainUSD;
+                            report.totalGainLossDKK += realizedGainDKK;
+
+                            position.quantity += evt.quantity; // it's subtracting
+                            position.totalCostUSD -= costOfSoldUSD;
+                            position.totalCostDKK -= costOfSoldDKK;
+
+                            if (position.quantity < 0.001m)
+                            {
+                                report.positions.Remove(evt.symbol);
+                            }
+
+                            report.totalCommissionsUSD += evt.commission;
+                            report.totalCommissionsDKK += evt.dailyRate * evt.commission;
+                        }
+                        break;
+
+                    case EventType.Split:
+                        Precondition.Check(position.quantity > 0, "Split should happen with quantity > 0");
+                        position.quantity += evt.quantity; // total cost unchanged
+                        break;
+
+                    case EventType.Transfer:
+                        // TODO EventType.TransferIn/Out and quantity always positive
+                        if (evt.quantity > 0)
+                        {
+                            position.quantity += evt.quantity;
+                            position.totalCostUSD += evt.amount;
+                            position.totalCostDKK += evt.dailyRate * evt.amount;
+                        }
+                        else
+                        {
+                            Precondition.Check(position.quantity > 0, "Transfer out should happen with quantity > 0");
+
+                            decimal averageCostUSD = position.quantity == 0 ? 0m : position.totalCostUSD / position.quantity;
+                            decimal averageCostDKK = position.quantity == 0 ? 0m : position.totalCostDKK / position.quantity;
+
+                            decimal transferedQuantity = -evt.quantity;
+
+                            decimal costOfTransferedUSD = averageCostUSD * transferedQuantity;
+                            decimal costOfTransferedDKK = averageCostDKK * transferedQuantity;
+
+                            position.quantity += evt.quantity;
+                            position.totalCostUSD -= costOfTransferedUSD;
+                            position.totalCostDKK -= costOfTransferedDKK;
+
+                            if (position.quantity < 0.001m)
+                            {
+                                report.positions.Remove(evt.symbol);
+                            }
+                        }
+                        break;
+
+                    case EventType.ReturnOfCapital:
+                        Precondition.Check(position.quantity > 0, "ReturnOfCapital implies quantity > 0");
+                        Precondition.Check(position.totalCostDKK > 0, "ReturnOfCapital implies totalCostDKK > 0");
+
+                        // The company handing you back a piece of your own original investment, not profit.
+                        // But if the capital returned is more than what you invested, then it is a profit (gain).
+                        // The capital returned is supposed to only reduce your totalCost, not the quantity.
+
+                        bool IsROCMoreThanWhatInvested = evt.dailyRate * evt.amount > position.totalCostDKK;
+                        if (IsROCMoreThanWhatInvested)
+                        {
+                            decimal realizedGainUSD = evt.amount - position.totalCostUSD;
+                            decimal realizedGainDKK = evt.dailyRate * evt.amount - position.totalCostDKK;
+
+                            RealizedGain gain = new RealizedGain(evt.symbol, realizedGainDKK, evt.dateTime);
+                            report.realizedGainsDKK.Add(gain);
+
+                            report.totalGainLossUSD += realizedGainUSD;
+                            report.totalGainLossDKK += realizedGainDKK;
+
+                            position.totalCostUSD = 0m;
+                            position.totalCostDKK = 0m;
+
+                            Trace.TraceError("Case ROC amount > costBasisTotal. Difference: {0} USD", realizedGainUSD);
+                        }
+                        else
+                        {
+                            position.totalCostUSD -= evt.amount;
+                            position.totalCostDKK -= evt.dailyRate * evt.amount;
+                        }
+                        break;
+                }
+            }
+
+            return report;
+        }
        
     }
+
+    
 
 }
