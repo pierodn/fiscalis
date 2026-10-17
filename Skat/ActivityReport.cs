@@ -63,6 +63,23 @@ namespace InteractiveBrokers
         }
     }
 
+    public class RealizedGainLoss
+    {
+        public string symbol;
+        public decimal totalRealizedPnl;
+
+        static public RealizedGainLoss Parse(string line)
+        {
+            string[] elements = Utils.SplitRow(line);
+
+            var realizedGainLoss = new RealizedGainLoss();
+            realizedGainLoss.symbol = Utils.Trim(elements[0]);
+            realizedGainLoss.totalRealizedPnl = decimal.Parse(Utils.Trim(elements[2]));
+
+            return realizedGainLoss;
+        }
+    }
+
     public class Position
     {
         public string symbol;
@@ -269,6 +286,7 @@ namespace InteractiveBrokers
     public class ActivityReport
     {
         public ChangeInNAV changeInNAV;
+        public List<RealizedGainLoss> realizedGainLosses;
         public List<Position> openPositions;
         public List<Trade> trades;
         public List<CorporateAction> corporateActions;
@@ -278,6 +296,7 @@ namespace InteractiveBrokers
 
         public ActivityReport(
             ChangeInNAV changeInNAV,
+            List<RealizedGainLoss> realizedGainLosses,
             List<Position> openPositions,
             List<Trade> trades,
             List<CorporateAction> corporateActions,
@@ -286,6 +305,7 @@ namespace InteractiveBrokers
             List<Transfer> transfers)
         {
             this.changeInNAV = changeInNAV;
+            this.realizedGainLosses = realizedGainLosses;
             this.openPositions = openPositions;
             this.trades = trades;
             this.corporateActions = corporateActions;
@@ -337,6 +357,11 @@ namespace InteractiveBrokers
             return report.openPositions;
         }
 
+        public decimal GetTotalRealizedGainLoss()
+        {
+            return realizedGainLosses.ToDictionary(r => r.symbol)[""].totalRealizedPnl;
+        }
+
 
         public static ActivityReport Import(string filePath)
         {
@@ -351,17 +376,19 @@ namespace InteractiveBrokers
             }
 
             // IBKR Activity Report section headers
-            const string ChangeInNAVHeader              = "\"FromDate\",\"ToDate\",\"StartingValue\",\"Mtm\",\"DepositsWithdrawals\",\"GrantActivity\",\"Dividends\",\"WithholdingTax\",\"Interest\",\"Commissions\",\"Realized\",\"EndingValue\",\"TWR\"";
-            const string PositionsSectionHeader         = "\"Symbol\",\"ISIN\",\"Quantity\",\"CostBasisPrice\",\"OpenPrice\",\"PositionValue\"";
-            const string TradesSectionHeader            = "\"Symbol\",\"ISIN\",\"DateTime\",\"Buy/Sell\",\"Quantity\",\"TradePrice\",\"CurrencyPrimary\",\"Proceeds\",\"IBCommission\",\"IBCommissionCurrency\"";
-            const string CorporateActionsSectionHeader  = "\"Symbol\",\"ISIN\",\"Date/Time\",\"Type\",\"Description\",\"Quantity\"";
-            const string GrantActivityHeader            = "\"Symbol\",\"ISIN\",\"VestingDate\",\"Quantity\",\"Price\",\"Value\"";
-            const string CashTransactionsSectionHeader  = "\"Symbol\",\"ISIN\",\"Date/Time\",\"Type\",\"Amount\",\"CurrencyPrimary\",\"Description\"";
-            const string TransfersSectionHeader         = "\"Symbol\",\"ISIN\",\"DateTime\",\"Type\",\"Quantity\",\"Direction\",\"CostBasis\",\"TransferPrice\",\"Description\"";
+            const string ChangeInNAVSectionHeader           = "\"FromDate\",\"ToDate\",\"StartingValue\",\"Mtm\",\"DepositsWithdrawals\",\"GrantActivity\",\"Dividends\",\"WithholdingTax\",\"Interest\",\"Commissions\",\"Realized\",\"EndingValue\",\"TWR\"";
+            const string RealizedPerfInBaseSectionHeader    = "\"Symbol\",\"ISIN\",\"TotalRealizedPnl\"";
+            const string PositionsSectionHeader             = "\"Symbol\",\"ISIN\",\"Quantity\",\"CostBasisPrice\",\"OpenPrice\",\"PositionValue\"";
+            const string TradesSectionHeader                = "\"Symbol\",\"ISIN\",\"DateTime\",\"Buy/Sell\",\"Quantity\",\"TradePrice\",\"CurrencyPrimary\",\"Proceeds\",\"IBCommission\",\"IBCommissionCurrency\"";
+            const string CorporateActionsSectionHeader      = "\"Symbol\",\"ISIN\",\"Date/Time\",\"Type\",\"Description\",\"Quantity\"";
+            const string GrantActivityHeader                = "\"Symbol\",\"ISIN\",\"VestingDate\",\"Quantity\",\"Price\",\"Value\"";
+            const string CashTransactionsSectionHeader      = "\"Symbol\",\"ISIN\",\"Date/Time\",\"Type\",\"Amount\",\"CurrencyPrimary\",\"Description\"";
+            const string TransfersSectionHeader             = "\"Symbol\",\"ISIN\",\"DateTime\",\"Type\",\"Quantity\",\"Direction\",\"CostBasis\",\"TransferPrice\",\"Description\"";
 
             string[] lines = File.ReadAllLines(filePath);
 
             int changeInNAVSectionIndex         = -1;
+            int RealizedPerfInBaseSectionIndex  = -1;
             int positionsSectionIndex           = -1;
             int tradesSectionIndex              = -1;
             int corporateActionsSectionIndex    = -1;
@@ -371,7 +398,8 @@ namespace InteractiveBrokers
 
             for (int i = 0; i < lines.Length; i++)
             {
-                if (lines[i].IndexOf(ChangeInNAVHeader) == 0)               changeInNAVSectionIndex = i;
+                if (lines[i].IndexOf(ChangeInNAVSectionHeader) == 0)        changeInNAVSectionIndex = i;
+                if (lines[i].IndexOf(RealizedPerfInBaseSectionHeader) == 0) RealizedPerfInBaseSectionIndex = i;
                 if (lines[i].IndexOf(PositionsSectionHeader) == 0)          positionsSectionIndex = i;
                 if (lines[i].IndexOf(TradesSectionHeader) == 0)             tradesSectionIndex = i;
                 if (lines[i].IndexOf(CorporateActionsSectionHeader) == 0)   corporateActionsSectionIndex = i;
@@ -382,7 +410,8 @@ namespace InteractiveBrokers
 
             // TODO turn into user errors
             Trace.Assert(changeInNAVSectionIndex == 0);
-            Trace.Assert(positionsSectionIndex > changeInNAVSectionIndex);
+            Trace.Assert(RealizedPerfInBaseSectionIndex > changeInNAVSectionIndex);
+            Trace.Assert(positionsSectionIndex > RealizedPerfInBaseSectionIndex);
             Trace.Assert(tradesSectionIndex > positionsSectionIndex);
             Trace.Assert(corporateActionsSectionIndex > tradesSectionIndex);
             Trace.Assert(grantActivitySectionIndex > corporateActionsSectionIndex);
@@ -390,6 +419,12 @@ namespace InteractiveBrokers
             Trace.Assert(transfersSectionIndex > cashTransactionsSectionIndex);
 
             var changeInNAV = ChangeInNAV.Parse(lines[changeInNAVSectionIndex+1]);
+
+            var realizedGainLosses = new List<RealizedGainLoss>();
+            for (int i = RealizedPerfInBaseSectionIndex + 1; i < positionsSectionIndex; i++)
+            {
+                realizedGainLosses.Add(RealizedGainLoss.Parse(lines[i]));
+            }
 
             var positions = new List<Position>();
             for (int i = positionsSectionIndex + 1; i < tradesSectionIndex; i++)
@@ -429,6 +464,7 @@ namespace InteractiveBrokers
 
             return new ActivityReport(
                 changeInNAV,
+                realizedGainLosses,
                 positions,
                 trades,
                 corporateActions,

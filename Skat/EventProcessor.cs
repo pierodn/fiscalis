@@ -13,17 +13,31 @@ using InteractiveBrokers;
 
 namespace EventProcessor
 {
-    public class RealizedGain
+    public class RealizedGainRecord
     {
         public string symbol;
-        public decimal amount;    // positive = gain, negative = loss
         public string dateTime;
+        public decimal fxRate;
+        public decimal proceedsUSD;
+        public decimal costOfSoldUSD;
+        public decimal realizedGainUSD;
+        public decimal proceedsDKK;
+        public decimal costOfSoldDKK;
+        public decimal realizedGainDKK;
 
-        public RealizedGain(string symbol, decimal amount, string dateTime)
+        public RealizedGainRecord(string symbol, string dateTime, decimal fxRate,
+            decimal proceedsUSD, decimal costOfSoldUSD, decimal realizedGainUSD,
+            decimal proceedsDKK, decimal costOfSoldDKK, decimal realizedGainDKK)
         {
             this.symbol = symbol;
-            this.amount = amount;
             this.dateTime = dateTime;
+            this.fxRate = fxRate;
+            this.proceedsUSD = proceedsUSD;
+            this.costOfSoldUSD = costOfSoldUSD;
+            this.realizedGainUSD = realizedGainUSD;
+            this.proceedsDKK = proceedsDKK;
+            this.costOfSoldDKK = costOfSoldDKK;
+            this.realizedGainDKK = realizedGainDKK;
         }
     }
 
@@ -57,7 +71,7 @@ namespace EventProcessor
         public Dictionary<string, Position> positions = new Dictionary<string, Position>();
 
         // For SKAT inspection
-        public List<RealizedGain> realizedGainsDKK = new List<RealizedGain>();
+        public List<RealizedGainRecord> realizedGainRecords = new List<RealizedGainRecord>();
 
         public TaxReport(List<Position> openPositions) 
         {
@@ -106,6 +120,33 @@ namespace EventProcessor
 
             Console.SetOut(original); // restore
         }
+
+        public void WriteRealizedRecords()
+        {
+            Console.WriteLine();
+            Console.WriteLine("Realized Gain Records");
+            Console.WriteLine("========================== FX ====== Proc ========= Cost ========= Gain ========= Proc ========= Cost ========= Gain =========");
+
+            decimal totalRealizedGainUSD = 0;
+            decimal totalRealizedGainDKK = 0;
+            
+            foreach (var record in this.realizedGainRecords)
+            {
+                Console.WriteLine("{0,-5} {1,-20} {2,6:F4} "
+                    + "{3,10:F2} USD {4,10:F2} USD {5,10:F2} USD "
+                    + "{6,10:F2} DKK {7,10:F2} DKK {8,10:F2} DKK ",
+                    record.symbol, record.dateTime, record.fxRate, 
+                    record.proceedsUSD, record.costOfSoldUSD, record.realizedGainUSD,
+                    record.proceedsDKK, record.costOfSoldDKK, record.realizedGainDKK);
+
+                totalRealizedGainUSD += record.realizedGainUSD;
+                totalRealizedGainDKK += record.realizedGainDKK;
+            }
+            Console.WriteLine("                                                                {0,10:F2} USD                               {1,10:F2} DKK",
+                totalRealizedGainUSD, totalRealizedGainDKK);
+
+
+        }
     }
 
     // ========================================
@@ -135,7 +176,7 @@ namespace EventProcessor
         public decimal quantity;   // signed for Trade (+buy/-sell); positive for transfers; extra shares for splits.
         public decimal price;      // per-unit price (trade price, or carried-over cost basis for transfers)
         public decimal commission; // Trade only
-        public decimal amount;     // total distribution amount (also ReturnOfCapital)
+        public decimal amount;     // total distribution amount (also ReturnOfCapital)  
         public decimal splitRatio; // e.g. 2.0 for a 2-for-1 split   // It's in quantity. TODO remove ?
 
         private Event()
@@ -219,7 +260,7 @@ namespace EventProcessor
                 dailyRate,
                 EventType.Trade, 
                 trade.quantity,
-                trade.tradePrice, // TODO remove ?
+                trade.tradePrice, // TODO remove ?  Because Proceeds = Quantity × Trade Price + commission
                 trade.commission, // TODO remove ?
                 trade.proceeds + trade.commission,  // netCashFlow => amount // negative = cash out (buy), positive = cash in (sell)
                 0.0m); // splitRatio
@@ -419,6 +460,13 @@ namespace EventProcessor
         {
             TaxReport report = new TaxReport(positions);
 
+            if (WriteEventSequence)
+            {
+                Console.WriteLine();
+                Console.WriteLine("Events Sequence");
+                Console.WriteLine("================================================================================================================");
+            }
+
             foreach (Event evt in events)
             {
                 if (WriteEventSequence)
@@ -488,25 +536,37 @@ namespace EventProcessor
                         }
                         else // SELL
                         {
-                            Precondition.Check(position.quantity > 0, "Selling implies quantity should be positive");
+                            decimal soldQuantity = -evt.quantity;
+                            //Precondition.Check(position.quantity > 0, "Selling implies quantity should be positive");
+                            Precondition.Check(soldQuantity <= position.quantity, "Can't sell more than the position quantity");
 
                             decimal averageCostUSD = position.quantity == 0 ? 0m : position.totalCostUSD / position.quantity;
                             decimal averageCostDKK = position.quantity == 0 ? 0m : position.totalCostDKK / position.quantity;
-
-                            decimal soldQuantity = -evt.quantity;
+                            
                             decimal costOfSoldUSD = averageCostUSD * soldQuantity;
                             decimal costOfSoldDKK = averageCostDKK * soldQuantity;
 
-                            decimal realizedGainUSD = evt.amount - costOfSoldUSD;
-                            decimal realizedGainDKK = evt.dailyRate * evt.amount - costOfSoldDKK;
+                            // Remember:
+                            //    amount = quantity * tradePrice     (aka "proceeds")
+                            //    cost   = quantity * averagePrice
+                            //    gain   = proceeds - cost
 
-                            RealizedGain gain = new RealizedGain(evt.symbol, realizedGainDKK, evt.dateTime);
-                            report.realizedGainsDKK.Add(gain);
+                            decimal proceedsUSD = evt.amount;
+                            decimal proceedsDKK = evt.dailyRate * evt.amount;
+
+                            decimal realizedGainUSD = proceedsUSD - costOfSoldUSD;
+                            decimal realizedGainDKK = proceedsDKK - costOfSoldDKK;
+                           
+                            RealizedGainRecord record = new RealizedGainRecord(
+                                evt.symbol, evt.dateTime, evt.dailyRate,
+                                proceedsUSD, costOfSoldUSD, realizedGainUSD,
+                                proceedsDKK, costOfSoldDKK, realizedGainDKK);
+                            report.realizedGainRecords.Add(record);
 
                             report.totalGainLossUSD += realizedGainUSD;
                             report.totalGainLossDKK += realizedGainDKK;
 
-                            position.quantity += evt.quantity; // it's subtracting
+                            position.quantity -= soldQuantity;
                             position.totalCostUSD -= costOfSoldUSD;
                             position.totalCostDKK -= costOfSoldDKK;
 
@@ -567,11 +627,16 @@ namespace EventProcessor
                         bool IsROCMoreThanWhatInvested = evt.dailyRate * evt.amount > position.totalCostDKK;
                         if (IsROCMoreThanWhatInvested)
                         {
-                            decimal realizedGainUSD = evt.amount - position.totalCostUSD;
-                            decimal realizedGainDKK = evt.dailyRate * evt.amount - position.totalCostDKK;
+                            decimal proceedsUSD = evt.amount;
+                            decimal proceedsDKK = evt.dailyRate * evt.amount;
 
-                            RealizedGain gain = new RealizedGain(evt.symbol, realizedGainDKK, evt.dateTime);
-                            report.realizedGainsDKK.Add(gain);
+                            decimal realizedGainUSD = proceedsUSD - position.totalCostUSD;
+                            decimal realizedGainDKK = proceedsDKK - position.totalCostDKK;
+
+                            RealizedGainRecord record = new RealizedGainRecord(evt.symbol, evt.dateTime, evt.dailyRate,
+                                proceedsUSD, position.totalCostUSD, realizedGainUSD,
+                                proceedsDKK, position.totalCostDKK, realizedGainDKK);
+                            report.realizedGainRecords.Add(record);
 
                             report.totalGainLossUSD += realizedGainUSD;
                             report.totalGainLossDKK += realizedGainDKK;
