@@ -80,13 +80,38 @@ namespace InteractiveBrokers
         }
     }
 
+    public class CashReport
+    {
+        public string fromDate;
+        public string toDate;
+        public decimal startingCash;
+        public decimal netTradesSales;
+        public decimal netTradesPurchases;
+        public decimal endingCash;
+
+        static public CashReport Parse(string line)
+        {
+            string[] elements = Utils.SplitRow(line);
+
+            var cashReport = new CashReport();
+
+            cashReport.fromDate = Utils.Trim(elements[0]);
+            cashReport.toDate = Utils.Trim(elements[1]);
+            cashReport.startingCash = decimal.Parse(Utils.Trim(elements[2]));
+            cashReport.netTradesSales = decimal.Parse(Utils.Trim(elements[3]));
+            cashReport.netTradesPurchases = decimal.Parse(Utils.Trim(elements[4]));
+            cashReport.endingCash = decimal.Parse(Utils.Trim(elements[5]));
+
+            return cashReport;
+        }
+    }
+
     public class Position
     {
         public string symbol;
         public decimal quantity;
         public decimal totalCostUSD; // This is initially coming from the OpenPositions of the previousActivityReport (if any).
         public decimal totalCostDKK; // This should somehow be inserted manually because it depends on the DKK-USD rates, which are generally unknown.
-        // public decimal averageCostDKK; // This is gennemsnitsmetoden: averageCostDKK = totalCostDKK / quantity;
         public decimal positionValue;
 
         static public Position Parse(string line)
@@ -104,15 +129,14 @@ namespace InteractiveBrokers
             position.quantity = decimal.Parse(Utils.Trim(elements[2]));
 
             decimal costBasisPrice = decimal.Parse(Utils.Trim(elements[3])); // This is the averagePricePerShare.
-            // decimal openPrice = decimal.Parse(Utils.Trim(elements[4])); // TODO maybe not needed as it looks generally the same as the costBasisPrice
-    
-            position.totalCostUSD = costBasisPrice * position.quantity;
-            position.positionValue = decimal.Parse(Utils.Trim(elements[5])); // This is the end-year position value today (endYearPrice * quantity) 
 
-            bool isTotalCostDKKPresent = elements.Length > 6;
+            position.totalCostUSD = costBasisPrice * position.quantity;
+            position.positionValue = decimal.Parse(Utils.Trim(elements[4])); // This is the end-year position value today (endYearPrice * quantity) 
+
+            bool isTotalCostDKKPresent = elements.Length > 5;
             if (isTotalCostDKKPresent)
             {
-                position.totalCostDKK = decimal.Parse(Utils.Trim(elements[6])); 
+                position.totalCostDKK = decimal.Parse(Utils.Trim(elements[5])); 
             } 
             else if (asktotalCostDKK)
             {
@@ -154,10 +178,8 @@ namespace InteractiveBrokers
         public string buySell; // removeable as it is in the sign of quantity
         public decimal quantity;
         public decimal tradePrice;
-        public string currency;
         public decimal proceeds; // = quantity * tradePrice
         public decimal commission;
-        public string commissionCurrency;
 
         static public Trade Parse(string line)
         {
@@ -170,10 +192,8 @@ namespace InteractiveBrokers
             trade.buySell = Utils.Trim(elements[3]);
             trade.quantity = decimal.Parse(Utils.Trim(elements[4]));
             trade.tradePrice = decimal.Parse(Utils.Trim(elements[5]));
-            trade.currency = Utils.Trim(elements[6]);
-            trade.proceeds = decimal.Parse(Utils.Trim(elements[7]));
-            trade.commission = decimal.Parse(Utils.Trim(elements[8]));
-            trade.commissionCurrency = Utils.Trim(elements[9]);
+            trade.proceeds = decimal.Parse(Utils.Trim(elements[6]));
+            trade.commission = decimal.Parse(Utils.Trim(elements[7]));
 
             return trade;
         }
@@ -287,6 +307,7 @@ namespace InteractiveBrokers
     {
         public ChangeInNAV changeInNAV;
         public List<RealizedGainLoss> realizedGainLosses;
+        public CashReport cashReport;
         public List<Position> openPositions;
         public List<Trade> trades;
         public List<CorporateAction> corporateActions;
@@ -297,6 +318,7 @@ namespace InteractiveBrokers
         public ActivityReport(
             ChangeInNAV changeInNAV,
             List<RealizedGainLoss> realizedGainLosses,
+            CashReport cashReport,
             List<Position> openPositions,
             List<Trade> trades,
             List<CorporateAction> corporateActions,
@@ -306,6 +328,7 @@ namespace InteractiveBrokers
         {
             this.changeInNAV = changeInNAV;
             this.realizedGainLosses = realizedGainLosses;
+            this.cashReport = cashReport;
             this.openPositions = openPositions;
             this.trades = trades;
             this.corporateActions = corporateActions;
@@ -349,6 +372,12 @@ namespace InteractiveBrokers
             return totalValue;
         }
 
+        public Dictionary<string, Position> GetOpenPositions()
+        {
+            return this.openPositions.ToDictionary(p => p.symbol);
+        }
+
+
         public static List<Position> ExtractPositions(string filePath)
         {
             Console.WriteLine("EXTRACTING StartPeriodPositions (from previous activity report): " + filePath);
@@ -378,8 +407,9 @@ namespace InteractiveBrokers
             // IBKR Activity Report section headers
             const string ChangeInNAVSectionHeader           = "\"FromDate\",\"ToDate\",\"StartingValue\",\"Mtm\",\"DepositsWithdrawals\",\"GrantActivity\",\"Dividends\",\"WithholdingTax\",\"Interest\",\"Commissions\",\"Realized\",\"EndingValue\",\"TWR\"";
             const string RealizedPerfInBaseSectionHeader    = "\"Symbol\",\"ISIN\",\"TotalRealizedPnl\"";
-            const string PositionsSectionHeader             = "\"Symbol\",\"ISIN\",\"Quantity\",\"CostBasisPrice\",\"OpenPrice\",\"PositionValue\"";
-            const string TradesSectionHeader                = "\"Symbol\",\"ISIN\",\"DateTime\",\"Buy/Sell\",\"Quantity\",\"TradePrice\",\"CurrencyPrimary\",\"Proceeds\",\"IBCommission\",\"IBCommissionCurrency\"";
+            const string CashReportSectionHeader            = "\"FromDate\",\"ToDate\",\"StartingCash\",\"NetTradesSales\",\"NetTradesPurchases\",\"EndingCash\"";
+            const string PositionsSectionHeader             = "\"Symbol\",\"ISIN\",\"Quantity\",\"CostBasisPrice\",\"PositionValue\"";
+            const string TradesSectionHeader                = "\"Symbol\",\"ISIN\",\"DateTime\",\"Buy/Sell\",\"Quantity\",\"TradePrice\",\"Proceeds\",\"IBCommission\"";
             const string CorporateActionsSectionHeader      = "\"Symbol\",\"ISIN\",\"Date/Time\",\"Type\",\"Description\",\"Quantity\"";
             const string GrantActivityHeader                = "\"Symbol\",\"ISIN\",\"VestingDate\",\"Quantity\",\"Price\",\"Value\"";
             const string CashTransactionsSectionHeader      = "\"Symbol\",\"ISIN\",\"Date/Time\",\"Type\",\"Amount\",\"CurrencyPrimary\",\"Description\"";
@@ -388,7 +418,8 @@ namespace InteractiveBrokers
             string[] lines = File.ReadAllLines(filePath);
 
             int changeInNAVSectionIndex         = -1;
-            int RealizedPerfInBaseSectionIndex  = -1;
+            int realizedPerfInBaseSectionIndex  = -1;
+            int cashReportSectionIndex          = -1;
             int positionsSectionIndex           = -1;
             int tradesSectionIndex              = -1;
             int corporateActionsSectionIndex    = -1;
@@ -399,7 +430,8 @@ namespace InteractiveBrokers
             for (int i = 0; i < lines.Length; i++)
             {
                 if (lines[i].IndexOf(ChangeInNAVSectionHeader) == 0)        changeInNAVSectionIndex = i;
-                if (lines[i].IndexOf(RealizedPerfInBaseSectionHeader) == 0) RealizedPerfInBaseSectionIndex = i;
+                if (lines[i].IndexOf(RealizedPerfInBaseSectionHeader) == 0) realizedPerfInBaseSectionIndex = i;
+                if (lines[i].IndexOf(CashReportSectionHeader) == 0)         cashReportSectionIndex = i;
                 if (lines[i].IndexOf(PositionsSectionHeader) == 0)          positionsSectionIndex = i;
                 if (lines[i].IndexOf(TradesSectionHeader) == 0)             tradesSectionIndex = i;
                 if (lines[i].IndexOf(CorporateActionsSectionHeader) == 0)   corporateActionsSectionIndex = i;
@@ -410,8 +442,9 @@ namespace InteractiveBrokers
 
             // TODO turn into user errors
             Trace.Assert(changeInNAVSectionIndex == 0);
-            Trace.Assert(RealizedPerfInBaseSectionIndex > changeInNAVSectionIndex);
-            Trace.Assert(positionsSectionIndex > RealizedPerfInBaseSectionIndex);
+            Trace.Assert(realizedPerfInBaseSectionIndex > changeInNAVSectionIndex);
+            Trace.Assert(cashReportSectionIndex > realizedPerfInBaseSectionIndex);
+            Trace.Assert(positionsSectionIndex > cashReportSectionIndex);
             Trace.Assert(tradesSectionIndex > positionsSectionIndex);
             Trace.Assert(corporateActionsSectionIndex > tradesSectionIndex);
             Trace.Assert(grantActivitySectionIndex > corporateActionsSectionIndex);
@@ -421,10 +454,12 @@ namespace InteractiveBrokers
             var changeInNAV = ChangeInNAV.Parse(lines[changeInNAVSectionIndex+1]);
 
             var realizedGainLosses = new List<RealizedGainLoss>();
-            for (int i = RealizedPerfInBaseSectionIndex + 1; i < positionsSectionIndex; i++)
+            for (int i = realizedPerfInBaseSectionIndex + 1; i < cashReportSectionIndex; i++)
             {
                 realizedGainLosses.Add(RealizedGainLoss.Parse(lines[i]));
             }
+
+            var cashReport = CashReport.Parse(lines[cashReportSectionIndex + 1]);
 
             var positions = new List<Position>();
             for (int i = positionsSectionIndex + 1; i < tradesSectionIndex; i++)
@@ -465,6 +500,7 @@ namespace InteractiveBrokers
             return new ActivityReport(
                 changeInNAV,
                 realizedGainLosses,
+                cashReport,
                 positions,
                 trades,
                 corporateActions,

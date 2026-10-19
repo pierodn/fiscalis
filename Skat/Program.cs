@@ -47,7 +47,7 @@ namespace LedgerToTax
             var fxRates = FxRates.Import2(Depot + "nationalbanken_2010-2026-10-08_USD.csv");
             
             // 2023
-            var startPeriodPositions = ActivityReport.ExtractPositions(Depot + "Schwab_2022.csv");
+            var startPeriodPositions = ActivityReport.ExtractPositions(Depot + "Schwab_2022.csv"); // include manually the positions from other accounts (Schwab, SAXO)
             var currentActivityReport = ActivityReport.Import(Depot + "IBKR_2023.csv");
 
             // 2024
@@ -63,12 +63,12 @@ namespace LedgerToTax
 
             var events = Event.FromActivityReport(currentActivityReport, fxRates);
 
-            TaxReport report = Event.Process(startPeriodPositions, events, WriteEventSequence);
+            TaxReport taxReport = Event.Process(startPeriodPositions, events, WriteEventSequence);
 
 
             if (WriteRealizedGainsList)
             {
-                report.WriteRealizedRecords();
+                taxReport.WriteRealizedRecords();
             }
 
             
@@ -78,21 +78,21 @@ namespace LedgerToTax
             Func<decimal, string> formatUSD = amount => string.Format("{0,14}", amount.ToString("F2") + " " + USD);
             Func<decimal, string> formatPercentage = amount => string.Format("{0,14}", amount.ToString("F2") + "%");
 
-            string totalInterestDKK = formatDKK(report.totalInterestDKK);
-            string totalInterestExpenseDKK = formatDKK(report.totalInterestExpenseDKK);
-            string totalDividendsDKK = formatDKK(report.totalDividendsDKK);
-            string totalGainLossDKK = formatDKK(report.totalGainLossDKK);
-            string totalWithholdingTaxDKK = formatDKK(report.totalWithholdingTaxDKK);
-            string totalCommissionsDKK = formatDKK(report.totalCommissionsDKK);
-            string totalDepositsWithdrawalsDKK = formatDKK(report.totalDepositsWithdrawalsDKK);
+            string totalInterestDKK = formatDKK(taxReport.totalInterestDKK);
+            string totalInterestExpenseDKK = formatDKK(taxReport.totalInterestExpenseDKK);
+            string totalDividendsDKK = formatDKK(taxReport.totalDividendsDKK);
+            string totalGainLossDKK = formatDKK(taxReport.totalGainLossDKK);
+            string totalWithholdingTaxDKK = formatDKK(taxReport.totalWithholdingTaxDKK);
+            string totalCommissionsDKK = formatDKK(taxReport.totalCommissionsDKK);
+            string totalDepositsWithdrawalsDKK = formatDKK(taxReport.totalDepositsWithdrawalsDKK);
 
-            string totalInterestUSD = formatUSD(report.totalInterestUSD);
-            string totalInterestExpenseUSD = formatUSD(report.totalInterestExpenseUSD);
-            string totalDividendsUSD = formatUSD(report.totalDividendsUSD);
-            string totalGainLossUSD = formatUSD(report.totalGainLossUSD);
-            string totalWithholdingTaxUSD = formatUSD(report.totalWithholdingTaxUSD);
-            string totalCommissionsUSD = formatUSD(report.totalCommissionsUSD);
-            string totalDepositsWithdrawalsUSD = formatUSD(report.totalDepositsWithdrawalsUSD);
+            string totalInterestUSD = formatUSD(taxReport.totalInterestUSD);
+            string totalInterestExpenseUSD = formatUSD(taxReport.totalInterestExpenseUSD);
+            string totalDividendsUSD = formatUSD(taxReport.totalDividendsUSD);
+            string totalGainLossUSD = formatUSD(taxReport.totalGainLossUSD);
+            string totalWithholdingTaxUSD = formatUSD(taxReport.totalWithholdingTaxUSD);
+            string totalCommissionsUSD = formatUSD(taxReport.totalCommissionsUSD);
+            string totalDepositsWithdrawalsUSD = formatUSD(taxReport.totalDepositsWithdrawalsUSD);
 
             string changeInNAVInterest = formatUSD(currentActivityReport.changeInNAV.interest);
             //string changeInNAVInterestExpense = string.Format("{0,15}", currentActivityReport.changeInNAV.totalInterestExpenseUSD.ToString("F2") + " USD");
@@ -106,14 +106,72 @@ namespace LedgerToTax
             string changeInNAVTimeWeightedReturn = formatPercentage(currentActivityReport.changeInNAV.timeWeightedReturn);
             string totalRealizedGainLoss = formatUSD(currentActivityReport.GetTotalRealizedGainLoss());
  
+            // TODO EndYearPortofolioValue for SKAT (Rubrik 490), including extra shares from other accounts, excluding 
+
+
+            // TODO
+
+            Dictionary<string, Position> calculatedEndYearPositions = taxReport.positions;
+            Dictionary<string, Position> currentActivityReportOpenPositions = currentActivityReport.GetOpenPositions();
+
+            decimal totalPositionValue = 0;
+
+            foreach (var pair in calculatedEndYearPositions)
+            {
+                string calculatedPositionSymbol = pair.Key;
+                Position calculatedPosition = pair.Value;
+
+                // Always pick the end-year price if present
+                if (currentActivityReportOpenPositions.ContainsKey(calculatedPositionSymbol))
+                {
+                    //Trace.Assert(calculatedPosition.positionValue == 0);    
+                    //Precondition.Check(calculatedPosition.positionValue > 0, "PositionValue not present in Previous Activity Report.");
+
+                    Position openPosition = currentActivityReportOpenPositions[calculatedPositionSymbol];
+                    Trace.Assert(openPosition.positionValue > 0);
+
+                    decimal endYearSharePrice = openPosition.positionValue / openPosition.quantity;
+                    calculatedPosition.positionValue = endYearSharePrice * calculatedPosition.quantity;    
+                }
+                else
+                {
+                    //Trace.Assert(calculatedPosition.positionValue > 0);
+                    Precondition.Check(calculatedPosition.positionValue > 0, "PositionValue not present in Activity Report.");
+                }
+ 
+                totalPositionValue += calculatedPosition.positionValue;
+            }
+
+            //currentActivityReportPositions.ToDictionary(p => p.symbol);
+
+            // Use the currentActivityReport OpenPositions to pick the end-year sharePrice
+
+            /*
+            foreach (Position position in this.endYearPositions.OrderBy(x => x.symbol))
+            {
+                Console.WriteLine(position);
+            }
+             */
+
+            // Some of these values are in the TaxReport. 
+            // They were supposed to be calculated in some way.
+            // But eventually retrieved here below.
+            // TODO remove from tax report
+
             string endYearDate = currentActivityReport.changeInNAV.toDate;
             decimal? endYearRate = fxRates.GetRate(endYearDate);
-            decimal portfolioValue = currentActivityReport.GetOpenPositionsValue();
-            string yearEndPorfolioValueUSD = formatUSD(portfolioValue);
-            string yearEndPorfolioValueDKK = formatDKK(endYearRate.Value * portfolioValue);
 
-            string NotAvailable = "N/A".PadLeft(14);
+            string yearEndPorfolioValueUSD = formatUSD(totalPositionValue);
+            string yearEndPorfolioValueDKK = formatDKK(endYearRate.Value * totalPositionValue);
+
+            string NotAvailable = "".PadLeft(14); //"N/A".PadLeft(14);
             Func<string, string, string> Verify = (a, b) => a.Equals(b) ? "OK" : "FAILED";
+
+            decimal endingCash = currentActivityReport.cashReport.endingCash;
+            string yearEndCashUSD = formatUSD(endingCash);
+            string yearEndCashDKK = formatDKK(endYearRate.Value * endingCash);
+
+            
             
 
   
@@ -126,8 +184,8 @@ namespace LedgerToTax
             Console.WriteLine("totalGainLoss        (Rubrik 454) : {0} {1} {2} => {3}", totalGainLossDKK, totalGainLossUSD, totalRealizedGainLoss, Verify(totalGainLossUSD, totalRealizedGainLoss));
             Console.WriteLine("totalWithholdingTax  (Rubrik 496) : {0} {1} {2} => {3}", totalWithholdingTaxDKK, totalWithholdingTaxUSD, changeInNAVWithholdingTax, Verify(totalWithholdingTaxUSD, changeInNAVWithholdingTax));
             Console.WriteLine("totalCommissions                  : {0} {1} {2} => {3}", totalCommissionsDKK, totalCommissionsUSD, changeInNAVCommissions, Verify(totalCommissionsUSD, changeInNAVCommissions));
-            Console.WriteLine("yearEndPorfolioValue (Rubrik 490) : {0} {1} {2} => {3}", yearEndPorfolioValueDKK, yearEndPorfolioValueUSD, yearEndPorfolioValueUSD, Verify(yearEndPorfolioValueUSD, yearEndPorfolioValueUSD));
-            Console.WriteLine("yearEndCash          (Rubrik 492) : ");
+            Console.WriteLine("yearEndPorfolioValue (Rubrik 490) : {0} {1} {2}", yearEndPorfolioValueDKK, yearEndPorfolioValueUSD, NotAvailable);
+            Console.WriteLine("yearEndCash          (Rubrik 492) : {0} {1} {2}", yearEndCashDKK, yearEndCashUSD, NotAvailable);
             Console.WriteLine("netFXGainLossFIFO    (Rubrik 434) : ");
             Console.WriteLine("totalDepositsWithdrawals          : {0} {1} {2} => {3}", totalDepositsWithdrawalsDKK, totalDepositsWithdrawalsUSD, changeInNAVDepositsWithdrawals, Verify(totalDepositsWithdrawalsUSD, changeInNAVDepositsWithdrawals));
             Console.WriteLine("startingValue                     : {0} {1} {2}", NotAvailable, NotAvailable, changeInNAVStartingValue);
@@ -137,11 +195,11 @@ namespace LedgerToTax
             Console.WriteLine();
             Console.WriteLine("End Period Positions (CALCULATED vs report)");
             Console.WriteLine("==================================================================================");
-            report.WritePositions();
+            taxReport.WritePositions();
             Console.WriteLine();
             currentActivityReport.WriteOpenPositions();
             Console.WriteLine();
-            Console.WriteLine("portfolioValue: " + formatUSD(portfolioValue));
+            Console.WriteLine("portfolioValue: " + formatUSD(totalPositionValue));
 
             Console.WriteLine();
             Console.WriteLine("PRESS ENTER");

@@ -51,7 +51,7 @@ namespace EventProcessor
         public decimal totalWithholdingTaxUSD;
         public decimal totalCommissionsUSD;
         public decimal yearEndPorfolioValueUSD;     // Market value of all shares at the End-Year.
-        public decimal yearEndCashUSD;              // Uninvested cash
+        public decimal yearEndCashUSD;              // TODO remove?
         public decimal totalDepositsWithdrawalsUSD;
 
         // For reporting to SKAT
@@ -75,7 +75,6 @@ namespace EventProcessor
 
         public TaxReport(List<Position> openPositions) 
         {
-            // TODO convert to DKK using the start period daily fxrate (?)
             positions = openPositions.ToDictionary(p => p.symbol);
         }
 
@@ -120,6 +119,17 @@ namespace EventProcessor
 
             Console.SetOut(original); // restore
         }
+        /*
+        public void GetTotalPositionsValue()
+        {
+            decimal totalValue = 0;
+            foreach (Position position in this.openPositions)
+            {
+                totalValue += position.positionValue;
+            }
+            return totalValue;
+        }
+         * */
 
         public void WriteRealizedRecords()
         {
