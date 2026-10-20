@@ -80,56 +80,8 @@ namespace EventProcessor
 
         public void WritePositions()
         {
-            WritePositions(Console.Out);
+            Position.WritePositions(this.positions);
         }
-
-        public void WritePositions(TextWriter writer)
-        {
-            TextWriter original = Console.Out;
-            Console.SetOut(writer);
-
-            List<string> keys = new List<string>(this.positions.Keys);
-            keys.Sort(StringComparer.Ordinal);
-            foreach (string key in keys)
-            {
-                Console.WriteLine(this.positions[key]);
-            }
-
-            Console.SetOut(original); // restore
-        }
-
-        public static void WritePositions(List<Position> positions)
-        {
-            WritePositions(positions, Console.Out);
-        }
-
-        public static void WritePositions(List<Position> positions, TextWriter writer)
-        {
-            TextWriter original = Console.Out;
-            Console.SetOut(writer);
-
-            var positionsDic = positions.ToDictionary(p => p.symbol);
-
-            List<string> keys = new List<string>(positionsDic.Keys);
-            keys.Sort(StringComparer.Ordinal);
-            foreach (string key in keys)
-            {
-                Console.WriteLine(positionsDic[key]);
-            }
-
-            Console.SetOut(original); // restore
-        }
-        /*
-        public void GetTotalPositionsValue()
-        {
-            decimal totalValue = 0;
-            foreach (Position position in this.openPositions)
-            {
-                totalValue += position.positionValue;
-            }
-            return totalValue;
-        }
-         * */
 
         public void WriteRealizedRecords()
         {

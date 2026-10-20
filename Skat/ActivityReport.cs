@@ -21,6 +21,9 @@ namespace InteractiveBrokers
         {
             return line.Split(new string[] { "\",\"" }, StringSplitOptions.None);
         }
+
+        public static Func<decimal, string> FormatUSD = amount => string.Format("{0,14}", amount.ToString("F2") + " USD");
+        public static Func<decimal, string> FormatDKK = amount => string.Format("{0,14}", amount.ToString("F2") + " DKK"); 
     }
 
     public class ChangeInNAV
@@ -155,19 +158,38 @@ namespace InteractiveBrokers
             return position;
         }
 
-        // TODO void ApplyBuy(decimal buyQuantity, decimal tradePrice)
-        // TODO decimal ApplySell(decimal sellQuantity, decimal tradePrice)
-        
+        static public void WritePositions(Dictionary<string, Position> positions)
+        {
+            WritePositions(positions.Values.ToList());
+        }
+
+        static public void WritePositions(List<Position> positions)
+        {
+            decimal totalCostUSD = 0;
+            decimal totalCostDKK = 0;
+            decimal totalValue = 0;
+
+            Console.WriteLine("==================== TotalCost ==== TotalCost ==== Value ===================");
+            foreach (Position position in positions.OrderBy(x => x.symbol))
+            {
+                Console.WriteLine(position);
+                totalCostUSD += position.totalCostUSD;
+                totalCostDKK += position.totalCostDKK;
+                totalValue += position.positionValue;
+            }
+            Console.WriteLine("Totals:           {0} {1} {2}", 
+                Utils.FormatUSD(totalCostUSD), Utils.FormatDKK(totalCostDKK), Utils.FormatUSD(totalValue));
+        }
+
         public override string ToString()
         {
             string symbol = this.symbol.PadRight(8);
             string quantity = this.quantity.ToString().PadRight(8);
-            string totalCostUSD = this.totalCostUSD.ToString("F2", CultureInfo.InvariantCulture).PadRight(10);
-            string totalCostDKK = this.totalCostDKK.ToString("F2", CultureInfo.InvariantCulture).PadRight(10);
-            string USD = "USD".PadRight(8);
-            string DKK = "DKK".PadRight(8);
+            string totalCostUSD = Utils.FormatUSD(this.totalCostUSD);
+            string totalCostDKK = Utils.FormatDKK(this.totalCostDKK);
+            string positionValueUSD = Utils.FormatUSD(this.positionValue);
 
-            return string.Format("{0} {1} {2} {3} {4} {5} (value {6} USD)", symbol, quantity, totalCostUSD, USD, totalCostDKK, DKK, positionValue, USD);
+            return string.Format("{0} {1} {2} {3} {4}", symbol, quantity, totalCostUSD, totalCostDKK, positionValueUSD);
         }
     }
 
@@ -356,10 +378,7 @@ namespace InteractiveBrokers
 
         public void WriteOpenPositions()
         {
-            foreach (Position position in this.openPositions.OrderBy(x => x.symbol))
-            {
-                Console.WriteLine(position);
-            }
+            Position.WritePositions(openPositions);
         }
 
         public decimal GetOpenPositionsValue()
