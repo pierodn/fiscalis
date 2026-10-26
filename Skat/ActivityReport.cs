@@ -74,6 +74,7 @@ namespace InteractiveBrokers
     public class RealizedGainLoss
     {
         public string symbol;
+        public string isin;
         public decimal totalRealizedPnl;
 
         static public RealizedGainLoss Parse(string line)
@@ -82,6 +83,7 @@ namespace InteractiveBrokers
 
             var realizedGainLoss = new RealizedGainLoss();
             realizedGainLoss.symbol = Utils.Trim(elements[0]);
+            realizedGainLoss.isin = Utils.Trim(elements[1]);
             realizedGainLoss.totalRealizedPnl = Utils.ParseDecimal(elements[2]);
 
             return realizedGainLoss;
@@ -178,7 +180,7 @@ namespace InteractiveBrokers
             decimal totalValue = 0;
 
             Console.WriteLine("================================ TotalCost ==== TotalCost ==== Value ===================");
-            foreach (Position position in positions.OrderBy(x => x.symbol))
+            foreach (Position position in positions.OrderBy(p => p.symbol))
             {
                 Console.WriteLine(position);
                 totalCostUSD += position.totalCostUSD;
@@ -411,7 +413,7 @@ namespace InteractiveBrokers
 
         public Dictionary<string, Position> GetOpenPositions()
         {
-            return this.openPositions.ToDictionary(p => p.symbol);
+            return this.openPositions.ToDictionary(p => p.isin);
         }
 
 
@@ -425,13 +427,7 @@ namespace InteractiveBrokers
 
         public decimal GetTotalRealizedGainLoss()
         {
-            // return realizedGainLosses.ToDictionary(r => r.symbol)[""].totalRealizedPnl;
-
-            var recordMap = realizedGainLosses.ToDictionary(r => r.symbol);
-            var record = recordMap[""];
-
-            return record.totalRealizedPnl;
-            
+            return realizedGainLosses.ToDictionary(r => r.isin)[""].totalRealizedPnl;
         }
 
 

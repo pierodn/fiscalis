@@ -77,7 +77,7 @@ namespace EventProcessor
 
         public TaxReport(List<Position> openPositions) 
         {
-            positions = openPositions.ToDictionary(p => p.symbol);
+            positions = openPositions.ToDictionary(p => p.isin);
         }
 
         public void WritePositions()
@@ -486,12 +486,12 @@ namespace EventProcessor
 
 
                 Position position;
-                if (!report.positions.TryGetValue(evt.symbol, out position))
+                if (!report.positions.TryGetValue(evt.isin, out position))
                 {
                     position = new Position();
                     position.symbol = evt.symbol;
                     position.isin = evt.isin;
-                    report.positions[evt.symbol] = position; // Dictionary todo ISIN
+                    report.positions[evt.isin] = position;
                 }
 
                 switch (evt.type)
@@ -549,7 +549,7 @@ namespace EventProcessor
 
                             if (position.quantity < 0.0001m)
                             {
-                                report.positions.Remove(evt.symbol);
+                                report.positions.Remove(evt.isin);
                             }
 
                             report.totalCommissionsUSD += evt.commission;
@@ -590,7 +590,7 @@ namespace EventProcessor
 
                             if (position.quantity < 0.0001m)
                             {
-                                report.positions.Remove(evt.symbol);
+                                report.positions.Remove(evt.isin);
                             }
                         }
                         break;

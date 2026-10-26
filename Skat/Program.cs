@@ -120,16 +120,16 @@ namespace LedgerToTax
 
             foreach (var pair in calculatedEndYearPositions)
             {
-                string calculatedPositionSymbol = pair.Key;
+                string calculatedPositionISIN = pair.Key;
                 Position calculatedPosition = pair.Value;
 
                 // Always pick the end-year price if present
-                if (currentActivityReportOpenPositions.ContainsKey(calculatedPositionSymbol))
+                if (currentActivityReportOpenPositions.ContainsKey(calculatedPositionISIN))
                 {
                     //Trace.Assert(calculatedPosition.positionValue == 0);    
                     //Precondition.Check(calculatedPosition.positionValue > 0, "PositionValue not present in Previous Activity Report.");
 
-                    Position openPosition = currentActivityReportOpenPositions[calculatedPositionSymbol];
+                    Position openPosition = currentActivityReportOpenPositions[calculatedPositionISIN];
                     Precondition.ASSERT(openPosition.positionValue > 0);
 
                     decimal endYearSharePrice = openPosition.positionValue / openPosition.quantity;
