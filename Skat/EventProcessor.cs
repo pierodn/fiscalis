@@ -514,14 +514,18 @@ namespace EventProcessor
                             decimal soldQuantity = -evt.quantity;
                             Precondition.ASSERT(soldQuantity > 0);
                             Precondition.ASSERT(soldQuantity <= position.quantity);
-                            Precondition.ASSERT(position.totalCostUSD > 0);
-                            Precondition.ASSERT(position.totalCostDKK > 0);
+                            Precondition.ASSERT(position.totalCostUSD >= 0);
+                            Precondition.ASSERT(position.totalCostDKK >= 0);
+
+                            bool closesPosition = (soldQuantity == position.quantity);
 
                             decimal averageCostUSD = position.totalCostUSD / position.quantity;
                             decimal averageCostDKK = position.totalCostDKK / position.quantity;
                             
-                            decimal costOfSoldUSD = averageCostUSD * soldQuantity;
-                            decimal costOfSoldDKK = averageCostDKK * soldQuantity;
+                            // Use the whole remaining pool for a full sale. This avoids leaving
+                            // a rounding residual in the cost basis after the position is closed.
+                            decimal costOfSoldUSD = closesPosition ? position.totalCostUSD : averageCostUSD * soldQuantity;
+                            decimal costOfSoldDKK = closesPosition ? position.totalCostDKK : averageCostDKK * soldQuantity;
 
                             // Remember:
                             //    amount = quantity * tradePrice     (which is "net proceeds", the cash received after commission)
@@ -547,7 +551,7 @@ namespace EventProcessor
                             position.totalCostUSD -= costOfSoldUSD;
                             position.totalCostDKK -= costOfSoldDKK;
 
-                            if (position.quantity < 0.0001m)
+                            if (position.quantity == 0m)
                             {
                                 report.positions.Remove(evt.isin);
                             }
