@@ -16,6 +16,7 @@ namespace EventProcessor
     public class RealizedGainRecord
     {
         public string symbol;
+        public string isin;
         public string dateTime;
         public decimal fxRate;
         public decimal proceedsUSD;
@@ -25,11 +26,12 @@ namespace EventProcessor
         public decimal costOfSoldDKK;
         public decimal realizedGainDKK;
 
-        public RealizedGainRecord(string symbol, string dateTime, decimal fxRate,
+        public RealizedGainRecord(string symbol, string isin, string dateTime, decimal fxRate,
             decimal proceedsUSD, decimal costOfSoldUSD, decimal realizedGainUSD,
             decimal proceedsDKK, decimal costOfSoldDKK, decimal realizedGainDKK)
         {
             this.symbol = symbol;
+            this.isin = isin;
             this.dateTime = dateTime;
             this.fxRate = fxRate;
             this.proceedsUSD = proceedsUSD;
@@ -87,27 +89,22 @@ namespace EventProcessor
         {
             Console.WriteLine();
             Console.WriteLine("Realized Gain Records");
-            Console.WriteLine("========================== FX ====== Proc ========= Cost ========= Gain ========= Proc ========= Cost ========= Gain =========");
+            Console.WriteLine("============================================ FX ====== Proceeds ===== BuyCost ====== GainLoss ===== Proceeds ===== BuyCost ====== GainLoss =====");
 
             decimal totalRealizedGainUSD = 0;
             decimal totalRealizedGainDKK = 0;
             
             foreach (var record in this.realizedGainRecords)
             {
-                Console.WriteLine("{0,-5} {1,-20} {2,6:F4} "
-                    + "{3,10:F2} USD {4,10:F2} USD {5,10:F2} USD "
-                    + "{6,10:F2} DKK {7,10:F2} DKK {8,10:F2} DKK ",
-                    record.symbol, record.dateTime, record.fxRate, 
+                Console.WriteLine("{0,-20} {1,-14} {2,-8} {3,6:F4} {4,10:F2} USD {5,10:F2} USD {6,10:F2} USD {7,10:F2} DKK {8,10:F2} DKK {9,10:F2} DKK ",
+                    record.dateTime, record.isin, record.symbol, record.fxRate, 
                     record.proceedsUSD, record.costOfSoldUSD, record.realizedGainUSD,
                     record.proceedsDKK, record.costOfSoldDKK, record.realizedGainDKK);
 
                 totalRealizedGainUSD += record.realizedGainUSD;
                 totalRealizedGainDKK += record.realizedGainDKK;
             }
-            Console.WriteLine("                                                                {0,10:F2} USD                               {1,10:F2} DKK",
-                totalRealizedGainUSD, totalRealizedGainDKK);
-
-
+            Console.WriteLine("{0,10:F2} USD".PadLeft(95) + "{1,10:F2} DKK".PadLeft(44), totalRealizedGainUSD, totalRealizedGainDKK);
         }
     }
 
@@ -117,6 +114,7 @@ namespace EventProcessor
 
     public enum EventType
     {
+        Unknown,
         Trade,
         Split,
         Transfer,
@@ -147,6 +145,7 @@ namespace EventProcessor
 
         private Event(
             string symbol,
+            string isin,
             string dateTime,
             decimal dailyRate, // to reportingCurrency
             // TODO string broker // IBKR, SAXO
@@ -159,6 +158,7 @@ namespace EventProcessor
             ) 
         {
             this.symbol = symbol;
+            this.isin = isin;
             this.dateTime = dateTime;
             this.dailyRate = dailyRate;
             this.type = type;
@@ -187,12 +187,19 @@ namespace EventProcessor
             {
                 events.Add(Event.FromCorporateAction(corporateAction, fxRates));
             }
-            /* 
+            
             foreach (var grant in activityReport.grants)
             {
-                events.Add(Event.FromGrantActivity(grant, fxRates));
+                bool isWithin =
+                    String.CompareOrdinal(grant.vestingDate, activityReport.changeInNAV.fromDate) >= 0 &&
+                    String.CompareOrdinal(grant.vestingDate, activityReport.changeInNAV.toDate) <= 0;
+
+                if (isWithin)
+                {
+                    events.Add(Event.FromGrantActivity(grant, fxRates));
+                }
             }
-            */
+            
             foreach (var cashTransaction in activityReport.cashTransactions)
             {
                 events.Add(Event.FromCashTransaction(cashTransaction, fxRates));
@@ -208,16 +215,17 @@ namespace EventProcessor
 
         public static Event FromTrade(Trade trade, FxRates fxRates)
         {
-            Trace.Assert(trade.quantity != 0);
-            Trace.Assert((trade.buySell.ToUpperInvariant() == "BUY") && (trade.quantity > 0) && (trade.proceeds < 0)
+            Precondition.ASSERT(trade.quantity != 0);
+            Precondition.ASSERT(trade.commission <= 0); // IBKR gives commission negative.
+            Precondition.ASSERT((trade.buySell.ToUpperInvariant() == "BUY") && (trade.quantity > 0) && (trade.proceeds < 0)
                       || (trade.buySell.ToUpperInvariant() == "SELL") && (trade.quantity < 0) && (trade.proceeds > 0));
+            
 
-            decimal? dailyRateFound = fxRates.GetRate(trade.dateTime);
-            Trace.Assert(dailyRateFound.HasValue);
-            decimal dailyRate = dailyRateFound.Value;
+            decimal dailyRate = fxRates.GetRate(trade.dateTime);
 
             return new Event(
                 trade.symbol,
+                trade.isin,
                 trade.dateTime,
                 dailyRate,
                 EventType.Trade, 
@@ -230,16 +238,18 @@ namespace EventProcessor
 
         public static Event FromTransfer(Transfer transfer, FxRates fxRates)
         {
-            Trace.Assert(transfer.quantity != 0);
-            Trace.Assert((transfer.type == "IN") && (transfer.quantity > 0) 
-                      || (transfer.type == "OUT") && (transfer.quantity < 0));
+            Precondition.ASSERT(transfer.quantity != 0);
+            // TODO this can be verified in 2026
+            Precondition.ASSERT((transfer.type == "IN") && (transfer.quantity > 0) 
+                            || (transfer.type == "OUT") && (transfer.quantity < 0));
 
             decimal? dailyRateFound = fxRates.GetRate(transfer.dateTime);
-            Trace.Assert(dailyRateFound.HasValue);
+            Precondition.ASSERT(dailyRateFound.HasValue);
             decimal dailyRate = dailyRateFound.Value;
 
             return new Event(
                 transfer.symbol,
+                transfer.isin,
                 transfer.dateTime,
                 dailyRate,
                 EventType.Transfer,
@@ -252,14 +262,13 @@ namespace EventProcessor
 
         public static Event FromCorporateAction(CorporateAction corporateAction, FxRates fxRates)
         {
-            Trace.Assert(corporateAction.quantity != 0);
+            Precondition.ASSERT(corporateAction.quantity != 0);
 
-            decimal? dailyRateFound = fxRates.GetRate(corporateAction.dateTime);
-            Trace.Assert(dailyRateFound.HasValue);
-            decimal dailyRate = dailyRateFound.Value;
+            decimal dailyRate = fxRates.GetRate(corporateAction.dateTime);
 
             Event evt = new Event();
             evt.symbol = corporateAction.symbol;
+            evt.isin = corporateAction.isin;
             evt.dateTime = corporateAction.dateTime;
             evt.dailyRate = dailyRate;
 
@@ -296,17 +305,16 @@ namespace EventProcessor
 
             return evt;     
         }
-/*
+
         public static Event FromGrantActivity(GrantActivity grantActivity, FxRates fxRates)
         {
-            Trace.Assert(grantActivity.value != 0);
+            Precondition.ASSERT(grantActivity.value != 0);
 
-            decimal? dailyRateFound = fxRates.GetRate(grantActivity.vestingDate);
-            Trace.Assert(dailyRateFound.HasValue);
-            decimal dailyRate = dailyRateFound.Value;
+            decimal dailyRate = fxRates.GetRate(grantActivity.vestingDate);
 
             Event evt = new Event();
             evt.symbol = grantActivity.symbol;
+            evt.isin = grantActivity.isin;
             evt.dateTime = grantActivity.vestingDate;
             evt.dailyRate = dailyRate;
 
@@ -316,17 +324,16 @@ namespace EventProcessor
 
             return evt;
         }
-  */      
+ 
         public static Event FromCashTransaction(CashTransaction cashTransaction, FxRates fxRates)
         {
-            Trace.Assert(cashTransaction.amount != 0);
+            Precondition.ASSERT(cashTransaction.amount != 0);
 
-            decimal? dailyRateFound = fxRates.GetRate(cashTransaction.dateTime);
-            Trace.Assert(dailyRateFound.HasValue);
-            decimal dailyRate = dailyRateFound.Value;
+            decimal dailyRate = fxRates.GetRate(cashTransaction.dateTime);
 
             Event evt = new Event();
             evt.symbol = cashTransaction.symbol;
+            evt.isin = cashTransaction.isin;
             evt.dateTime = cashTransaction.dateTime;
             evt.dailyRate = dailyRate;
 
@@ -368,15 +375,18 @@ namespace EventProcessor
         {
             string dateColumn = dateTime;
             string symbolColumn = symbol;
+            string isinColumn = isin;
             string eventTypeColumn = "";
-            string qtyByPriceColumn = "";
+            string quantityColumn = "";
+            string priceColumn = "";
             string detailsColumn = "";
 
             switch (type)
             {
                 case EventType.Trade:
                     eventTypeColumn = (quantity > 0 ? "BUY" : "SELL");
-                    qtyByPriceColumn = (quantity > 0 ? " " : "") + quantity + " * " + price;
+                    quantityColumn = string.Format("{0,9}", quantity.ToString("F2")).Replace(".00", "   ");
+                    priceColumn = string.Format("{0,7}", price.ToString("F2"));
                     detailsColumn = "Amount=" + amount + " Commission=" + commission;
                     break;
                 case EventType.Split:
@@ -384,7 +394,7 @@ namespace EventProcessor
                     detailsColumn = "Getting extra " + quantity;
                     break;
                 case EventType.Transfer:
-                    eventTypeColumn = "TRANSFER";
+                    eventTypeColumn = "TX";
                     detailsColumn = "Quantity=" + quantity + " Amount=" + amount + " (costBasis including commission " + commission + ")";
                     break;
                 case EventType.ReturnOfCapital:
@@ -409,10 +419,12 @@ namespace EventProcessor
 
 
             string line = 
-                dateColumn.PadRight(20) + 
-                symbolColumn.PadRight(6) +
-                eventTypeColumn.PadRight(20) + 
-                qtyByPriceColumn.PadRight(20) +
+                dateColumn.PadRight(20) +
+                isinColumn.PadRight(16) +
+                symbolColumn.PadRight(9) +
+                eventTypeColumn.PadRight(6) +
+                quantityColumn.PadRight(10) + 
+                priceColumn.PadRight(12) +
                 detailsColumn;
 
            return line;
@@ -478,7 +490,8 @@ namespace EventProcessor
                 {
                     position = new Position();
                     position.symbol = evt.symbol;
-                    report.positions[evt.symbol] = position;
+                    position.isin = evt.isin;
+                    report.positions[evt.symbol] = position; // Dictionary todo ISIN
                 }
 
                 switch (evt.type)
@@ -499,30 +512,32 @@ namespace EventProcessor
                         else // SELL
                         {
                             decimal soldQuantity = -evt.quantity;
-                            //Precondition.Check(position.quantity > 0, "Selling implies quantity should be positive");
-                            Precondition.Check(soldQuantity <= position.quantity, "Can't sell more than the position quantity");
+                            Precondition.ASSERT(soldQuantity > 0);
+                            Precondition.ASSERT(soldQuantity <= position.quantity);
+                            Precondition.ASSERT(position.totalCostUSD > 0);
+                            Precondition.ASSERT(position.totalCostDKK > 0);
 
-                            decimal averageCostUSD = position.quantity == 0 ? 0m : position.totalCostUSD / position.quantity;
-                            decimal averageCostDKK = position.quantity == 0 ? 0m : position.totalCostDKK / position.quantity;
+                            decimal averageCostUSD = position.totalCostUSD / position.quantity;
+                            decimal averageCostDKK = position.totalCostDKK / position.quantity;
                             
                             decimal costOfSoldUSD = averageCostUSD * soldQuantity;
                             decimal costOfSoldDKK = averageCostDKK * soldQuantity;
 
                             // Remember:
-                            //    amount = quantity * tradePrice     (aka "proceeds")
+                            //    amount = quantity * tradePrice     (which is "net proceeds", the cash received after commission)
                             //    cost   = quantity * averagePrice
                             //    gain   = proceeds - cost
 
-                            decimal proceedsUSD = evt.amount;
-                            decimal proceedsDKK = evt.dailyRate * evt.amount;
+                            decimal netProceedsUSD = evt.amount;  
+                            decimal netProceedsDKK = evt.dailyRate * evt.amount;
 
-                            decimal realizedGainUSD = proceedsUSD - costOfSoldUSD;
-                            decimal realizedGainDKK = proceedsDKK - costOfSoldDKK;
+                            decimal realizedGainUSD = netProceedsUSD - costOfSoldUSD;
+                            decimal realizedGainDKK = netProceedsDKK - costOfSoldDKK;
                            
                             RealizedGainRecord record = new RealizedGainRecord(
-                                evt.symbol, evt.dateTime, evt.dailyRate,
-                                proceedsUSD, costOfSoldUSD, realizedGainUSD,
-                                proceedsDKK, costOfSoldDKK, realizedGainDKK);
+                                evt.symbol, evt.isin, evt.dateTime, evt.dailyRate,
+                                netProceedsUSD, costOfSoldUSD, realizedGainUSD,
+                                netProceedsDKK, costOfSoldDKK, realizedGainDKK);
                             report.realizedGainRecords.Add(record);
 
                             report.totalGainLossUSD += realizedGainUSD;
@@ -532,7 +547,7 @@ namespace EventProcessor
                             position.totalCostUSD -= costOfSoldUSD;
                             position.totalCostDKK -= costOfSoldDKK;
 
-                            if (position.quantity < 0.001m)
+                            if (position.quantity < 0.0001m)
                             {
                                 report.positions.Remove(evt.symbol);
                             }
@@ -543,7 +558,7 @@ namespace EventProcessor
                         break;
 
                     case EventType.Split:
-                        Precondition.Check(position.quantity > 0, "Split should happen with quantity > 0");
+                        Precondition.ASSERT(position.quantity > 0);
                         position.quantity += evt.quantity; // total cost unchanged
                         break;
 
@@ -557,10 +572,12 @@ namespace EventProcessor
                         }
                         else
                         {
-                            Precondition.Check(position.quantity > 0, "Transfer out should happen with quantity > 0");
+                            Precondition.ASSERT(position.quantity > 0);
+                            Precondition.ASSERT(position.totalCostUSD > 0);
+                            Precondition.ASSERT(position.totalCostDKK > 0);
 
-                            decimal averageCostUSD = position.quantity == 0 ? 0m : position.totalCostUSD / position.quantity;
-                            decimal averageCostDKK = position.quantity == 0 ? 0m : position.totalCostDKK / position.quantity;
+                            decimal averageCostUSD = position.totalCostUSD / position.quantity;
+                            decimal averageCostDKK = position.totalCostDKK / position.quantity;
 
                             decimal transferedQuantity = -evt.quantity;
 
@@ -571,7 +588,7 @@ namespace EventProcessor
                             position.totalCostUSD -= costOfTransferedUSD;
                             position.totalCostDKK -= costOfTransferedDKK;
 
-                            if (position.quantity < 0.001m)
+                            if (position.quantity < 0.0001m)
                             {
                                 report.positions.Remove(evt.symbol);
                             }
@@ -579,8 +596,8 @@ namespace EventProcessor
                         break;
 
                     case EventType.ReturnOfCapital:
-                        Precondition.Check(position.quantity > 0, "ReturnOfCapital implies quantity > 0");
-                        Precondition.Check(position.totalCostDKK > 0, "ReturnOfCapital implies totalCostDKK > 0");
+                        Precondition.ASSERT(position.quantity > 0);
+                        Precondition.ASSERT(position.totalCostDKK > 0);
 
                         // The company handing you back a piece of your own original investment, not profit.
                         // But if the capital returned is more than what you invested, then it is a profit (gain).
@@ -595,7 +612,8 @@ namespace EventProcessor
                             decimal realizedGainUSD = proceedsUSD - position.totalCostUSD;
                             decimal realizedGainDKK = proceedsDKK - position.totalCostDKK;
 
-                            RealizedGainRecord record = new RealizedGainRecord(evt.symbol, evt.dateTime, evt.dailyRate,
+                            RealizedGainRecord record = new RealizedGainRecord(
+                                evt.symbol, evt.isin, evt.dateTime, evt.dailyRate,
                                 proceedsUSD, position.totalCostUSD, realizedGainUSD,
                                 proceedsDKK, position.totalCostDKK, realizedGainDKK);
                             report.realizedGainRecords.Add(record);

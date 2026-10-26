@@ -17,6 +17,11 @@ namespace InteractiveBrokers
             return s.Trim().Trim('"');
         }
 
+        public static decimal ParseDecimal(string s)
+        {
+            return decimal.Parse(s.Trim().Trim('"'), CultureInfo.InvariantCulture);
+        }
+
         public static string[] SplitRow(string line)
         {
             return line.Split(new string[] { "\",\"" }, StringSplitOptions.None);
@@ -50,17 +55,17 @@ namespace InteractiveBrokers
 
             changeInNAV.fromDate = Utils.Trim(elements[0]);
             changeInNAV.toDate = Utils.Trim(elements[1]);
-            changeInNAV.startingValue = decimal.Parse(Utils.Trim(elements[2]));
-            changeInNAV.markToMarket = decimal.Parse(Utils.Trim(elements[3]));
-            changeInNAV.depositsWithdrawals = decimal.Parse(Utils.Trim(elements[4]));
-            changeInNAV.grantActivity = decimal.Parse(Utils.Trim(elements[5]));
-            changeInNAV.dividends = decimal.Parse(Utils.Trim(elements[6]));
-            changeInNAV.withholdingTax = decimal.Parse(Utils.Trim(elements[7]));
-            changeInNAV.interest = decimal.Parse(Utils.Trim(elements[8]));
-            changeInNAV.commissions = decimal.Parse(Utils.Trim(elements[9]));
-            changeInNAV.realized = decimal.Parse(Utils.Trim(elements[10]));
-            changeInNAV.endingValue = decimal.Parse(Utils.Trim(elements[11]));
-            changeInNAV.timeWeightedReturn = decimal.Parse(Utils.Trim(elements[12]));
+            changeInNAV.startingValue = Utils.ParseDecimal(elements[2]);
+            changeInNAV.markToMarket = Utils.ParseDecimal(elements[3]);
+            changeInNAV.depositsWithdrawals = Utils.ParseDecimal(elements[4]);
+            changeInNAV.grantActivity = Utils.ParseDecimal(elements[5]);
+            changeInNAV.dividends = Utils.ParseDecimal(elements[6]);
+            changeInNAV.withholdingTax = Utils.ParseDecimal(elements[7]);
+            changeInNAV.interest = Utils.ParseDecimal(elements[8]);
+            changeInNAV.commissions = Utils.ParseDecimal(elements[9]);
+            changeInNAV.realized = Utils.ParseDecimal(elements[10]);
+            changeInNAV.endingValue = Utils.ParseDecimal(elements[11]);
+            changeInNAV.timeWeightedReturn = Utils.ParseDecimal(elements[12]);
 
             return changeInNAV;
         }
@@ -77,7 +82,7 @@ namespace InteractiveBrokers
 
             var realizedGainLoss = new RealizedGainLoss();
             realizedGainLoss.symbol = Utils.Trim(elements[0]);
-            realizedGainLoss.totalRealizedPnl = decimal.Parse(Utils.Trim(elements[2]));
+            realizedGainLoss.totalRealizedPnl = Utils.ParseDecimal(elements[2]);
 
             return realizedGainLoss;
         }
@@ -100,10 +105,10 @@ namespace InteractiveBrokers
 
             cashReport.fromDate = Utils.Trim(elements[0]);
             cashReport.toDate = Utils.Trim(elements[1]);
-            cashReport.startingCash = decimal.Parse(Utils.Trim(elements[2]));
-            cashReport.netTradesSales = decimal.Parse(Utils.Trim(elements[3]));
-            cashReport.netTradesPurchases = decimal.Parse(Utils.Trim(elements[4]));
-            cashReport.endingCash = decimal.Parse(Utils.Trim(elements[5]));
+            cashReport.startingCash = Utils.ParseDecimal(elements[2]);
+            cashReport.netTradesSales = Utils.ParseDecimal(elements[3]);
+            cashReport.netTradesPurchases = Utils.ParseDecimal(elements[4]);
+            cashReport.endingCash = Utils.ParseDecimal(elements[5]);
 
             return cashReport;
         }
@@ -112,6 +117,7 @@ namespace InteractiveBrokers
     public class Position
     {
         public string symbol;
+        public string isin;
         public decimal quantity;
         public decimal totalCostUSD; // This is initially coming from the OpenPositions of the previousActivityReport (if any).
         public decimal totalCostDKK; // This should somehow be inserted manually because it depends on the DKK-USD rates, which are generally unknown.
@@ -129,17 +135,18 @@ namespace InteractiveBrokers
             var position = new Position();
 
             position.symbol = Utils.Trim(elements[0]);
-            position.quantity = decimal.Parse(Utils.Trim(elements[2]));
+            position.isin = Utils.Trim(elements[1]);
+            position.quantity = Utils.ParseDecimal(elements[2]);
 
-            decimal costBasisPrice = decimal.Parse(Utils.Trim(elements[3])); // This is the averagePricePerShare.
+            decimal costBasisPrice = Utils.ParseDecimal(elements[3]); // This is the averagePricePerShare.
 
             position.totalCostUSD = costBasisPrice * position.quantity;
-            position.positionValue = decimal.Parse(Utils.Trim(elements[4])); // This is the end-year position value today (endYearPrice * quantity) 
+            position.positionValue = Utils.ParseDecimal(elements[4]); // This is the end-year position value today (endYearPrice * quantity) 
 
             bool isTotalCostDKKPresent = elements.Length > 5;
             if (isTotalCostDKKPresent)
             {
-                position.totalCostDKK = decimal.Parse(Utils.Trim(elements[5])); 
+                position.totalCostDKK = Utils.ParseDecimal(elements[5]); 
             } 
             else if (asktotalCostDKK)
             {
@@ -150,7 +157,8 @@ namespace InteractiveBrokers
                     Boolean success = decimal.TryParse(input, out position.totalCostDKK);
                     if (!success)
                     {
-                        Trace.Assert(success, "Error parsing decimal");
+                        throw new InvalidOperationException("Error parsing decimal");
+
                     }
                 }
             }
@@ -169,7 +177,7 @@ namespace InteractiveBrokers
             decimal totalCostDKK = 0;
             decimal totalValue = 0;
 
-            Console.WriteLine("==================== TotalCost ==== TotalCost ==== Value ===================");
+            Console.WriteLine("================================ TotalCost ==== TotalCost ==== Value ===================");
             foreach (Position position in positions.OrderBy(x => x.symbol))
             {
                 Console.WriteLine(position);
@@ -177,25 +185,26 @@ namespace InteractiveBrokers
                 totalCostDKK += position.totalCostDKK;
                 totalValue += position.positionValue;
             }
-            Console.WriteLine("Totals:           {0} {1} {2}", 
-                Utils.FormatUSD(totalCostUSD), Utils.FormatDKK(totalCostDKK), Utils.FormatUSD(totalValue));
+            Console.WriteLine("{0} {1} {2}".PadLeft(42), Utils.FormatUSD(totalCostUSD), Utils.FormatDKK(totalCostDKK), Utils.FormatUSD(totalValue));
         }
 
         public override string ToString()
         {
             string symbol = this.symbol.PadRight(8);
-            string quantity = this.quantity.ToString().PadRight(8);
+            string isin = this.isin.PadRight(14);
+            string quantity = this.quantity.ToString().PadRight(6);
             string totalCostUSD = Utils.FormatUSD(this.totalCostUSD);
             string totalCostDKK = Utils.FormatDKK(this.totalCostDKK);
             string positionValueUSD = Utils.FormatUSD(this.positionValue);
 
-            return string.Format("{0} {1} {2} {3} {4}", symbol, quantity, totalCostUSD, totalCostDKK, positionValueUSD);
+            return string.Format("{0} {1} {2} {3} {4} {5}", isin, symbol, quantity, totalCostUSD, totalCostDKK, positionValueUSD);
         }
     }
 
     public class Trade
     {
         public string symbol;
+        public string isin;
         public string dateTime;
         public string buySell; // removeable as it is in the sign of quantity
         public decimal quantity;
@@ -210,12 +219,13 @@ namespace InteractiveBrokers
             var trade = new Trade();
 
             trade.symbol = Utils.Trim(elements[0]);
+            trade.isin = Utils.Trim(elements[1]);
             trade.dateTime = Utils.Trim(elements[2]);
             trade.buySell = Utils.Trim(elements[3]);
-            trade.quantity = decimal.Parse(Utils.Trim(elements[4]));
-            trade.tradePrice = decimal.Parse(Utils.Trim(elements[5]));
-            trade.proceeds = decimal.Parse(Utils.Trim(elements[6]));
-            trade.commission = decimal.Parse(Utils.Trim(elements[7]));
+            trade.quantity = Utils.ParseDecimal(elements[4]);
+            trade.tradePrice = Utils.ParseDecimal(elements[5]);
+            trade.proceeds = Utils.ParseDecimal(elements[6]);
+            trade.commission = Utils.ParseDecimal(elements[7]);
 
             return trade;
         }
@@ -224,6 +234,7 @@ namespace InteractiveBrokers
     public class CorporateAction
     {
         public string symbol;
+        public string isin;
         public string dateTime;
         public string type; // "FS" stands for SPLIT. See description
         public string description;
@@ -236,10 +247,11 @@ namespace InteractiveBrokers
             var corporateAction = new CorporateAction();
 
             corporateAction.symbol = Utils.Trim(elements[0]);
+            corporateAction.isin = Utils.Trim(elements[1]);
             corporateAction.dateTime = Utils.Trim(elements[2]);
             corporateAction.type = Utils.Trim(elements[3]);
             corporateAction.description = Utils.Trim(elements[4]);
-            corporateAction.quantity = decimal.Parse(Utils.Trim(elements[5]));
+            corporateAction.quantity = Utils.ParseDecimal(elements[5]);
 
             return corporateAction;
         }
@@ -248,6 +260,7 @@ namespace InteractiveBrokers
     public class GrantActivity
     {
         public string symbol;
+        public string isin;
         public string vestingDate;
         public decimal quantity;
         public decimal price;
@@ -260,10 +273,11 @@ namespace InteractiveBrokers
             var grantActivity = new GrantActivity();
 
             grantActivity.symbol = Utils.Trim(elements[0]);
+            grantActivity.isin = Utils.Trim(elements[1]);
             grantActivity.vestingDate = Utils.Trim(elements[2]);
-            grantActivity.quantity = decimal.Parse(Utils.Trim(elements[3]));
-            grantActivity.price = decimal.Parse(Utils.Trim(elements[4]));
-            grantActivity.value = decimal.Parse(Utils.Trim(elements[5]));
+            grantActivity.quantity = Utils.ParseDecimal(elements[3]);
+            grantActivity.price = Utils.ParseDecimal(elements[4]);
+            grantActivity.value = Utils.ParseDecimal(elements[5]);
 
             return grantActivity;
         }
@@ -272,6 +286,7 @@ namespace InteractiveBrokers
     public class CashTransaction
     {
         public string symbol;
+        public string isin;
         public string dateTime;
         public string type; // "Withholding Tax", "Dividends", "Payment In Lieu Of Dividends", "Deposits/Withdrawals", "Broker Interest Received"
         public decimal amount;
@@ -285,9 +300,10 @@ namespace InteractiveBrokers
             var cashTransaction = new CashTransaction();
 
             cashTransaction.symbol = Utils.Trim(elements[0]);
+            cashTransaction.isin = Utils.Trim(elements[1]);
             cashTransaction.dateTime = Utils.Trim(elements[2]);
             cashTransaction.type = Utils.Trim(elements[3]);
-            cashTransaction.amount = decimal.Parse(Utils.Trim(elements[4]));
+            cashTransaction.amount = Utils.ParseDecimal(elements[4]);
             cashTransaction.currency = Utils.Trim(elements[5]);
             cashTransaction.description = Utils.Trim(elements[6]);
 
@@ -298,8 +314,9 @@ namespace InteractiveBrokers
     public class Transfer
     {
         public string symbol;
+        public string isin;
         public string dateTime;
-        public string type; // "ACATS"
+        public string type;
         public decimal quantity;
         public string direction; // IN // TEMP
         public decimal costBasis;
@@ -313,12 +330,13 @@ namespace InteractiveBrokers
             var transfer = new Transfer();
 
             transfer.symbol = Utils.Trim(elements[0]);
+            transfer.isin = Utils.Trim(elements[1]);
             transfer.dateTime = Utils.Trim(elements[2]);
             transfer.type = Utils.Trim(elements[3]); // TEMP???
-            transfer.quantity = decimal.Parse(Utils.Trim(elements[4]));
+            transfer.quantity = Utils.ParseDecimal(elements[4]);
             transfer.direction = Utils.Trim(elements[5]); // TEMP
-            transfer.costBasis = decimal.Parse(Utils.Trim(elements[6]));
-            transfer.transferPrice = decimal.Parse(Utils.Trim(elements[7]));
+            transfer.costBasis = Utils.ParseDecimal(elements[6]);
+            transfer.transferPrice = Utils.ParseDecimal(elements[7]);
             transfer.description = Utils.Trim(elements[8]); // TEMP
 
             return transfer;
@@ -407,7 +425,13 @@ namespace InteractiveBrokers
 
         public decimal GetTotalRealizedGainLoss()
         {
-            return realizedGainLosses.ToDictionary(r => r.symbol)[""].totalRealizedPnl;
+            // return realizedGainLosses.ToDictionary(r => r.symbol)[""].totalRealizedPnl;
+
+            var recordMap = realizedGainLosses.ToDictionary(r => r.symbol);
+            var record = recordMap[""];
+
+            return record.totalRealizedPnl;
+            
         }
 
 
@@ -459,16 +483,15 @@ namespace InteractiveBrokers
                 if (lines[i].IndexOf(TransfersSectionHeader) == 0)          transfersSectionIndex = i;
             }
 
-            // TODO turn into user errors
-            Trace.Assert(changeInNAVSectionIndex == 0);
-            Trace.Assert(realizedPerfInBaseSectionIndex > changeInNAVSectionIndex);
-            Trace.Assert(cashReportSectionIndex > realizedPerfInBaseSectionIndex);
-            Trace.Assert(positionsSectionIndex > cashReportSectionIndex);
-            Trace.Assert(tradesSectionIndex > positionsSectionIndex);
-            Trace.Assert(corporateActionsSectionIndex > tradesSectionIndex);
-            Trace.Assert(grantActivitySectionIndex > corporateActionsSectionIndex);
-            Trace.Assert(cashTransactionsSectionIndex > grantActivitySectionIndex);
-            Trace.Assert(transfersSectionIndex > cashTransactionsSectionIndex);
+            Precondition.ASSERT(changeInNAVSectionIndex == 0);
+            Precondition.ASSERT(realizedPerfInBaseSectionIndex > changeInNAVSectionIndex);
+            Precondition.ASSERT(cashReportSectionIndex > realizedPerfInBaseSectionIndex);
+            Precondition.ASSERT(positionsSectionIndex > cashReportSectionIndex);
+            Precondition.ASSERT(tradesSectionIndex > positionsSectionIndex);
+            Precondition.ASSERT(corporateActionsSectionIndex > tradesSectionIndex);
+            Precondition.ASSERT(grantActivitySectionIndex > corporateActionsSectionIndex);
+            Precondition.ASSERT(cashTransactionsSectionIndex > grantActivitySectionIndex);
+            Precondition.ASSERT(transfersSectionIndex > cashTransactionsSectionIndex);
 
             var changeInNAV = ChangeInNAV.Parse(lines[changeInNAVSectionIndex+1]);
 

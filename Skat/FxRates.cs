@@ -22,7 +22,7 @@ namespace Nationalbanken
             rates = _rates;
         }
 
-        public decimal? GetRate(string dateStr)
+        public decimal GetRate(string dateStr)
         {
             const int MaxDaysBack = 9;
 
@@ -39,9 +39,7 @@ namespace Nationalbanken
                 date = date.AddDays(-1);
             }
 
-            Trace.TraceError("Can't find the daily rate for " + dateStr);
-
-            return null;
+            throw new InvalidOperationException("Can't find the daily rate for " + dateStr);
         }
 
         public static FxRates Import(string filePath)

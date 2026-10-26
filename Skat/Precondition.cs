@@ -6,7 +6,7 @@ namespace MyDiagnostics
 {
     public static class Precondition
     {
-        public static void Check(bool condition, string message)
+        public static void ASSERT(bool condition)
         {
             if (!condition)
             {
@@ -20,11 +20,8 @@ namespace MyDiagnostics
                     ? frame.GetFileLineNumber()
                     : 0;
 
-                Console.WriteLine(
-                    "[PRECONDITION FAILED] in {0}:{1}{2}",
-                    fileName,
-                    lineNumber,
-                    message == null ? "" : " => " + message);
+                string message = string.Format("[PRECONDITION FAILED] in {0}:{1}", fileName, lineNumber);
+                throw new InvalidOperationException(message);
             }
         }
     }
