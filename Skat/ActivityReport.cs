@@ -125,6 +125,15 @@ namespace InteractiveBrokers
         public decimal totalCostDKK; // This should somehow be inserted manually because it depends on the DKK-USD rates, which are generally unknown.
         public decimal positionValue;
 
+        // Returns ISIN if available; otherwise falls back to Symbol
+        public string Key
+        {
+            get
+            {
+                return !string.IsNullOrEmpty(this.isin) && this.isin.Trim().Length > 0 ? this.isin.Trim() : this.symbol.Trim();
+            }
+        }
+
         static public Position Parse(string line)
         {
             return Parse(line, false);
@@ -413,7 +422,7 @@ namespace InteractiveBrokers
 
         public Dictionary<string, Position> GetOpenPositions()
         {
-            return this.openPositions.ToDictionary(p => p.isin);
+            return this.openPositions.ToDictionary(p => p.Key);
         }
 
 
@@ -427,7 +436,8 @@ namespace InteractiveBrokers
 
         public decimal GetTotalRealizedGainLoss()
         {
-            return realizedGainLosses.ToDictionary(r => r.isin)[""].totalRealizedPnl;
+            var totalRow = realizedGainLosses.FirstOrDefault(r => string.IsNullOrEmpty(r.isin) && string.IsNullOrEmpty(r.symbol));
+            return totalRow != null ? totalRow.totalRealizedPnl : 0m;
         }
 
 

@@ -39,7 +39,7 @@ namespace LedgerToTax
         static Func<decimal, string> FormatDKK = amount => string.Format("{0,14}", amount.ToString("F2") + " " + DKK);
         static Func<decimal, string> FormatUSD = amount => string.Format("{0,14}", amount.ToString("F2") + " " + USD);
         static Func<decimal, string> FormatPercentage = amount => string.Format("{0,14}", amount.ToString("F2") + "%");
-        static Func<string, string, string> Verify = (a, b) => a.Equals(b) ? "OK" : "FAILED";
+        static Func<string, string, string> Verify = (a, b) => a.Equals(b) ? "OK" : "DELTA";
 
         static void Main(string[] args)
         {
@@ -120,16 +120,14 @@ namespace LedgerToTax
 
             foreach (var pair in calculatedEndYearPositions)
             {
-                string calculatedPositionISIN = pair.Key;
+                string calculatedPositionKey = pair.Key; // Holds either ISIN or Symbol
                 Position calculatedPosition = pair.Value;
 
                 // Always pick the end-year price if present
-                if (currentActivityReportOpenPositions.ContainsKey(calculatedPositionISIN))
+                if (currentActivityReportOpenPositions.ContainsKey(calculatedPositionKey))
                 {
-                    //Trace.Assert(calculatedPosition.positionValue == 0);    
-                    //Precondition.Check(calculatedPosition.positionValue > 0, "PositionValue not present in Previous Activity Report.");
-
-                    Position openPosition = currentActivityReportOpenPositions[calculatedPositionISIN];
+                    // 1. Position exists in the current broker's report: calculate current year-end price
+                    Position openPosition = currentActivityReportOpenPositions[calculatedPositionKey];
                     Precondition.ASSERT(openPosition.positionValue > 0);
 
                     decimal endYearSharePrice = openPosition.positionValue / openPosition.quantity;
@@ -137,7 +135,28 @@ namespace LedgerToTax
                 }
                 else
                 {
-                    Precondition.ASSERT(calculatedPosition.positionValue > 0);
+                    // 2. Position is external (e.g. Schwab / Saxo): prompt for current year-end price
+                    decimal priorYearPrice = calculatedPosition.quantity > 0
+                        ? calculatedPosition.positionValue / calculatedPosition.quantity
+                        : 0m;
+                    Console.WriteLine();
+                    Console.ForegroundColor = ConsoleColor.Yellow;
+                    Console.WriteLine("[NOTICE] Position {0} ({1} shares) was not found in the current activity report.",
+                        calculatedPosition.symbol, calculatedPosition.quantity);
+                    Console.ResetColor();
+                    Console.Write("==> Enter {0} year-end closing price in USD (Press Enter to keep prior year's ${1:F2}): ",
+                        calculatedPosition.symbol, priorYearPrice);
+                    string input = Console.ReadLine();
+                    decimal endYearSharePrice;
+                    if (!string.IsNullOrEmpty(input) && decimal.TryParse(input, NumberStyles.Any, CultureInfo.InvariantCulture, out endYearSharePrice))
+                    {
+                        calculatedPosition.positionValue = endYearSharePrice * calculatedPosition.quantity;
+                    }
+                    else
+                    {
+                        // Fall back to prior year if user presses Enter
+                        Precondition.ASSERT(calculatedPosition.positionValue > 0);
+                    }
                 }
  
                 totalPositionValue += calculatedPosition.positionValue;

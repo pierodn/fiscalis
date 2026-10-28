@@ -77,7 +77,7 @@ namespace EventProcessor
 
         public TaxReport(List<Position> openPositions) 
         {
-            positions = openPositions.ToDictionary(p => p.isin);
+            positions = openPositions.ToDictionary(p => p.Key);
         }
 
         public void WritePositions()
@@ -138,6 +138,14 @@ namespace EventProcessor
         public decimal commission; // Trade only
         public decimal amount;     // total distribution amount (also ReturnOfCapital)  
         public decimal splitRatio; // e.g. 2.0 for a 2-for-1 split   // It's in quantity. TODO remove ?
+
+        public string PositionKey
+        {
+            get
+            {
+                return !string.IsNullOrEmpty(this.isin) && this.isin.Trim().Length > 0 ? this.isin.Trim() : this.symbol.Trim();
+            }
+        }
 
         private Event()
         {
@@ -205,9 +213,11 @@ namespace EventProcessor
                 events.Add(Event.FromCashTransaction(cashTransaction, fxRates));
             }
 
-            events = events 
-                .OrderBy(e => e.dateTime)
-                .ThenBy(e => e.quantity > 0 ? 0 : 1) // acquisitions first at the same timestamp
+            events = events
+                .OrderBy(e => e.dateTime.Substring(0, 10))      // Group by Day first
+                .ThenBy(e => e.type == EventType.Split ? 0 : 1) // Splits take effect before market opens
+                .ThenBy(e => e.dateTime)
+                .ThenBy(e => e.quantity > 0 ? 0 : 1)            // acquisitions first at the same timestamp
                 .ToList();
 
             return events;
@@ -216,7 +226,6 @@ namespace EventProcessor
         public static Event FromTrade(Trade trade, FxRates fxRates)
         {
             Precondition.ASSERT(trade.quantity != 0);
-            Precondition.ASSERT(trade.commission <= 0); // IBKR gives commission negative.
             Precondition.ASSERT((trade.buySell.ToUpperInvariant() == "BUY") && (trade.quantity > 0) && (trade.proceeds < 0)
                       || (trade.buySell.ToUpperInvariant() == "SELL") && (trade.quantity < 0) && (trade.proceeds > 0));
             
@@ -291,7 +300,7 @@ namespace EventProcessor
                     // (verify at the point where you have access to the current Position, likely in BuildPositions
                     //  rather than here in BuildCorporateActionEvent, since this function doesn't see Position state)
                     evt.type = EventType.Trade;
-                    evt.quantity = corporateAction.quantity;       // should be negative = full position close-out
+                    evt.quantity = -Math.Abs(corporateAction.quantity); // Expected negtaive, enforce is negative => full position close-out
                     evt.amount = 0m; // proceeds received (0 for DW)
                     break;
 
@@ -351,7 +360,7 @@ namespace EventProcessor
             {
                 evt.type = EventType.Dividends;
             }
-            else if (t.IndexOf("deposit") >= 0)
+            else if (t.IndexOf("deposit") >= 0 || t.IndexOf("withdrawal") >= 0 || d.IndexOf("deposit") >= 0 || d.IndexOf("withdrawal") >= 0)
             {
                 evt.type = EventType.DepositOrWithdrawal;
             }
@@ -361,7 +370,7 @@ namespace EventProcessor
             }
             else
             {
-                Trace.TraceError("Unhandled cashTransaction.type: " + cashTransaction.type);
+                throw new InvalidOperationException("Unhandled cashTransaction.type: " + cashTransaction.type);
             }
 
             evt.quantity = 0m;
@@ -398,6 +407,7 @@ namespace EventProcessor
                     detailsColumn = "Quantity=" + quantity + " Amount=" + amount + " (costBasis including commission " + commission + ")";
                     break;
                 case EventType.ReturnOfCapital:
+                    eventTypeColumn = "ROC";
                     detailsColumn = "Return Of Capital: " + amount;
                     break;
                 case EventType.Dividends:
@@ -484,14 +494,24 @@ namespace EventProcessor
                     continue;
                 }
 
-
+                string key = evt.PositionKey;
                 Position position;
-                if (!report.positions.TryGetValue(evt.isin, out position))
+                if (!report.positions.TryGetValue(key, out position))
                 {
-                    position = new Position();
-                    position.symbol = evt.symbol;
-                    position.isin = evt.isin;
-                    report.positions[evt.isin] = position;
+                    // Graceful migration check: if previously keyed by symbol, update to ISIN
+                    if (!string.IsNullOrEmpty(evt.symbol) && report.positions.TryGetValue(evt.symbol, out position))
+                    {
+                        report.positions.Remove(evt.symbol);
+                        position.isin = evt.isin;
+                        report.positions[key] = position;
+                    }
+                    else
+                    {
+                        position = new Position();
+                        position.symbol = evt.symbol;
+                        position.isin = evt.isin;
+                        report.positions[key] = position;
+                    }
                 }
 
                 switch (evt.type)
@@ -511,23 +531,33 @@ namespace EventProcessor
                         }
                         else // SELL
                         {
+                            const decimal Epsilon = 0.0001m;
+
                             decimal soldQuantity = -evt.quantity;
                             Precondition.ASSERT(soldQuantity > 0);
-                            Precondition.ASSERT(soldQuantity <= position.quantity);
                             Precondition.ASSERT(position.totalCostUSD >= 0);
                             Precondition.ASSERT(position.totalCostDKK >= 0);
 
-                            bool closesPosition = (soldQuantity == position.quantity);
+                            // 1. Detect if this sale is effectively closing the full position (within rounding tolerance)
+                            bool closesPosition = (position.quantity <= soldQuantity) || Math.Abs(position.quantity - soldQuantity) < Epsilon;
+                            if (closesPosition)
+                            {
+                                // Snap soldQuantity to exact position quantity to absorb any CSV rounding dust
+                                soldQuantity = position.quantity;
+                            }
+                            else
+                            {
+                                Precondition.ASSERT(soldQuantity < position.quantity);
+                            }
 
                             decimal averageCostUSD = position.totalCostUSD / position.quantity;
                             decimal averageCostDKK = position.totalCostDKK / position.quantity;
-                            
-                            // Use the whole remaining pool for a full sale. This avoids leaving
-                            // a rounding residual in the cost basis after the position is closed.
+
+                            // 2. If closing, allocate the entire remaining pool to avoid residual cents
                             decimal costOfSoldUSD = closesPosition ? position.totalCostUSD : averageCostUSD * soldQuantity;
                             decimal costOfSoldDKK = closesPosition ? position.totalCostDKK : averageCostDKK * soldQuantity;
 
-                            // Remember:
+                            // NOTE:
                             //    amount = quantity * tradePrice     (which is "net proceeds", the cash received after commission)
                             //    cost   = quantity * averagePrice
                             //    gain   = proceeds - cost
@@ -551,9 +581,10 @@ namespace EventProcessor
                             position.totalCostUSD -= costOfSoldUSD;
                             position.totalCostDKK -= costOfSoldDKK;
 
-                            if (position.quantity == 0m)
+                            // 3. Remove from dictionary if closed or if only micro-dust remains
+                            if (closesPosition || position.quantity < Epsilon)
                             {
-                                report.positions.Remove(evt.isin);
+                                report.positions.Remove(key);
                             }
 
                             report.totalCommissionsUSD += evt.commission;
@@ -594,46 +625,70 @@ namespace EventProcessor
 
                             if (position.quantity < 0.0001m)
                             {
-                                report.positions.Remove(evt.isin);
+                                report.positions.Remove(key);
                             }
                         }
                         break;
 
                     case EventType.ReturnOfCapital:
-                        Precondition.ASSERT(position.quantity > 0);
-                        Precondition.ASSERT(position.totalCostDKK > 0);
 
                         // The company handing you back a piece of your own original investment, not profit.
                         // But if the capital returned is more than what you invested, then it is a profit (gain).
                         // The capital returned is supposed to only reduce your totalCost, not the quantity.
 
-                        bool IsROCMoreThanWhatInvested = evt.dailyRate * evt.amount > position.totalCostDKK;
-                        if (IsROCMoreThanWhatInvested)
+                        Precondition.ASSERT(position.quantity > 0);
+                        Precondition.ASSERT(position.totalCostDKK > 0);
+                        Precondition.ASSERT(position.totalCostUSD > 0);
+
+                        decimal rocUSD = evt.amount;
+                        decimal rocDKK = evt.dailyRate * evt.amount;
+
+                        decimal costAbsorbedUSD;
+                        decimal rocRealizedGainUSD = 0m;
+
+                        decimal costAbsorbedDKK;
+                        decimal rocRealizedGainDKK = 0m;
+
+                        // 1. Process USD basis reduction
+                        if (rocUSD > position.totalCostUSD)
                         {
-                            decimal proceedsUSD = evt.amount;
-                            decimal proceedsDKK = evt.dailyRate * evt.amount;
-
-                            decimal realizedGainUSD = proceedsUSD - position.totalCostUSD;
-                            decimal realizedGainDKK = proceedsDKK - position.totalCostDKK;
-
-                            RealizedGainRecord record = new RealizedGainRecord(
-                                evt.symbol, evt.isin, evt.dateTime, evt.dailyRate,
-                                proceedsUSD, position.totalCostUSD, realizedGainUSD,
-                                proceedsDKK, position.totalCostDKK, realizedGainDKK);
-                            report.realizedGainRecords.Add(record);
-
-                            report.totalGainLossUSD += realizedGainUSD;
-                            report.totalGainLossDKK += realizedGainDKK;
-
+                            // Capital returned exceeds total cost: excess is a taxable gain
+                            costAbsorbedUSD = position.totalCostUSD;
+                            rocRealizedGainUSD = rocUSD - position.totalCostUSD;
                             position.totalCostUSD = 0m;
-                            position.totalCostDKK = 0m;
-
-                            Trace.TraceError("Case ROC amount > costBasisTotal. Difference: {0} USD", realizedGainUSD);
                         }
                         else
                         {
-                            position.totalCostUSD -= evt.amount;
-                            position.totalCostDKK -= evt.dailyRate * evt.amount;
+                            // Capital returned simply reduces basis
+                            costAbsorbedUSD = rocUSD;
+                            position.totalCostUSD -= rocUSD;
+                        }
+
+                        // 2. Process DKK basis reduction independently
+                        if (rocDKK > position.totalCostDKK)
+                        {
+                            // Capital returned exceeds total DKK cost: excess is a taxable gain in DKK
+                            costAbsorbedDKK = position.totalCostDKK;
+                            rocRealizedGainDKK = rocDKK - position.totalCostDKK;
+                            position.totalCostDKK = 0m;
+                        }
+                        else
+                        {
+                            // Capital returned simply reduces DKK basis
+                            costAbsorbedDKK = rocDKK;
+                            position.totalCostDKK -= rocDKK;
+                        }
+
+                        // 3. Record realized gain if either currency generated excess profit
+                        if (rocRealizedGainUSD > 0m || rocRealizedGainDKK > 0m)
+                        {
+                            RealizedGainRecord record = new RealizedGainRecord(
+                                evt.symbol, evt.isin, evt.dateTime, evt.dailyRate,
+                                rocUSD, costAbsorbedUSD, rocRealizedGainUSD,
+                                rocDKK, costAbsorbedDKK, rocRealizedGainDKK);
+                            report.realizedGainRecords.Add(record);
+                            report.totalGainLossUSD += rocRealizedGainUSD;
+                            report.totalGainLossDKK += rocRealizedGainDKK;
                         }
                         break;
                 }
