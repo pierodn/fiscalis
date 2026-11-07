@@ -1,111 +1,68 @@
 # Fiscalis
 
-Fiscalis is a small command-line utility for preparing Danish tax figures from
-Interactive Brokers (IBKR) activity reports. It replays investment activity,
-maintains a weighted-average cost basis, converts relevant USD amounts to DKK
-using Danmarks Nationalbank daily rates, and prints figures intended to help
-with SKAT reporting.
+Fiscalis is a multi-account tax utility that aggregates trading histories, converts to a target currency, and replays transaction logs to compute realized P/L using custom cost-basis methods (FIFO, Average Cost).
+
+## Motivation
+
+After trading for several years across multiple foreign brokers and currencies, I realized my local tax agency would not simply accept the realized gain/loss reported by my brokers. Instead, they required all calculations to be processed as if every trade occurred within a single unified asset pool, with foreign amounts converted using daily exchange rates.
+
+Manually reconstructing thousands of trades across multiple years under these rules was an insurmountable task. To make matters worse, foreign brokers calculated realized P/L using FIFO, whereas my tax authority strictly mandated the Average Cost method.
+
+I built Fiscalis to automate this exact problem: ingesting exported trading activity from disparate accounts, normalizing execution dates and exchange rates, and deterministically replaying history to compute accurate, tax-compliant P/L.
 
 > This project is a personal calculation aid, not tax advice. Verify the
 > output, the applicable tax rules, and all final figures before filing.
 
-## What it calculates
+## Features & Calculations
 
-For the configured reporting period, the program imports opening holdings and
-the current IBKR activity report, then calculates or displays:
+For a configured reporting period, Fiscalis ingests historical ledger data, opening positions, and execution logs to calculate and display:
 
-- realised share gains and losses using the average-cost method
-  (`gennemsnitsmetoden`);
-- foreign dividends and withholding tax;
-- positive and negative interest;
-- commissions and deposits/withdrawals;
-- period-end share value and cash value, converted to DKK; and
-- a reconciliation against selected values in the IBKR report.
+- Realized share gains and losses using target cost-basis accounting (e.g., Average Cost pooling or FIFO).
+- Foreign dividends and withholding taxes converted to reporting currency.
+- Positive and negative cash interest.
+- Brokerage commissions, deposits, and cash withdrawals.
+- Period-end portfolio market values and total cash balances converted to the target reporting currency.
+- Reconciliation checks against source account statements and raw broker reports.
 
-Each sale uses the DKK-weighted average cost of the shares held immediately
-before the sale. Purchase commissions are included in the cost basis and sale
-commissions reduce net sale proceeds.
+Each transaction evaluates the weighted cost basis of the shared asset pool immediately prior to execution. Purchase commissions are integrated into the asset cost basis, while sale commissions directly reduce net sale proceeds.
 
 ## Requirements
 
 - Windows
 - .NET Framework 3.5 / Visual Studio capable of building a .NET 3.5 project
-- An IBKR CSV Activity Report for the prior and current period
-- A USD/DKK daily-rate CSV export from Danmarks Nationalbank
+- Account activity exports or transaction CSV files for prior and current periods
+- Daily FX exchange rate reference file (CSV) from a central bank or financial authority
 
-The solution is [`Fiscalis.sln`](Fiscalis.sln); the executable project is
-[`Skat/ledger2tax.csproj`](Skat/ledger2tax.csproj).
+## Input Files & Architecture
 
-## Input files
+Fiscalis relies on structured account statements and daily exchange rate feeds to perform deterministic replay calculations.
 
-The program currently expects its input files in:
+The core pipeline processes:
 
-```text
-C:\Users\Admin\Downloads\
-```
+1. **FX Exchange Rates:** Daily rate CSV files mapping foreign transaction currencies to your target base reporting currency.
+2. **Opening Positions:** Historical position statements establishing starting quantity pools and cost bases.
+3. **Activity Logs:** Time-ordered trading activity, including order fills, dividend income, cash movements, and corporate actions.
 
-The active configuration in [`Skat/Program.cs`](Skat/Program.cs) uses:
 
-```text
-nationalbanken_2010-2026-10-08_USD.csv
-IBKR_2024.csv        # opening positions
-IBKR_2025.csv        # activity for the reporting period
-```
+### Broker Activity Reports
 
-Change `Depot` and the selected filenames in `Program.cs` before running for a
-different machine or tax year.
+The built-in parser ingests standardized multi-section CSV reports containing key operational blocks:
 
-### IBKR activity report
-
-The importer expects a CSV report with these sections, in this order:
-
-1. Change in NAV
-2. Realized & Unrealized Performance Summary / realised performance
-3. Cash Report
-4. Open Positions
-5. Trades
+1. Changes in NAV / Account Summaries
+2. Realized & Unrealized Performance Summaries
+3. Cash Reports
+4. Open Positions & Holdings
+5. Executed Trades
 6. Corporate Actions
-7. Grant Activity
-8. Cash Transactions
-9. Transfers
+7. Cash Movements & Dividends
+8. Account Transfers
 
-Opening positions are loaded from the prior-period report. The DKK cost basis
-is not available in the normal IBKR position section, so the program asks for
-it interactively unless an additional DKK-cost column is already present.
+If starting cost bases in the target reporting currency are missing from initial position imports, Fiscalis can prompt interactively to establish baseline values for the asset pool.
 
-### FX rates
 
-Export daily USD exchange rates from Danmarks Nationalbank as CSV. The current
-importer expects the semicolon-separated format containing a `dd-mm-yyyy` date
-and a USD quotation per 100 USD. It converts this to DKK per USD internally.
+## Features
 
-## Build and run
-
-Open `Fiscalis.sln` in a compatible Visual Studio version and build the
-`Skat` project, then run the resulting executable. The program is interactive:
-it may request missing opening DKK cost bases and waits for Enter before exit.
-
-## Important limitations
-
-- The current workflow is designed for USD-denominated IBKR activity.
-- Input locations and reporting-year filenames are hard-coded in `Program.cs`.
-- The parser expects the specific IBKR report layout described above.
-- `Rubrik 434` foreign-exchange FIFO gain/loss is displayed as a placeholder;
-  it is not calculated.
-- Corporate actions and transfers should be reviewed carefully against source
-  documents before relying on the results.
-
-## Project layout
-
-```text
-Skat/
-  ActivityReport.cs   IBKR CSV parsing and report models
-  EventProcessor.cs   event conversion, position pool, and tax calculations
-  FxRates.cs          Danmarks Nationalbank USD/DKK import and lookup
-  Program.cs          configured workflow and console output
-  Precondition.cs     calculation invariants
-```
-
-## License
-
-See [LICENSE](LICENSE).
+- **Expanded Parsers:** Ongoing extension of transaction parsers to support diverse multi-broker statement formats.
+- **Multi-Currency Normalization:** Generalizing FX pipelines to dynamically convert multiple foreign trade currencies into any arbitrarily configured target base currency.
+- **Advanced Currency P/L:** Expanding foreign exchange cash gain/loss calculations.
+- **Complex Corporate Actions:** Ongoing refinement for handling complex corporate restructurings, spin-offs, and stock splits.

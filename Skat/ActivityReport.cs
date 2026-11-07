@@ -31,6 +31,26 @@ namespace InteractiveBrokers
         public static Func<decimal, string> FormatDKK = amount => string.Format("{0,14}", amount.ToString("F2") + " DKK"); 
     }
 
+    public class AccountInformation
+    {
+        public string clientAccountID;
+        public string currencyPrimary;
+        public string dateOpened;
+
+        static public AccountInformation Parse(string line)
+        {
+            string[] elements = Utils.SplitRow(line);
+
+            var accountInformation = new AccountInformation();
+
+            accountInformation.clientAccountID = Utils.Trim(elements[0]);
+            accountInformation.currencyPrimary = Utils.Trim(elements[1]);
+            accountInformation.dateOpened = Utils.Trim(elements[2]);
+
+            return accountInformation;
+        }
+    }
+
     public class ChangeInNAV
     {
         public string fromDate;
@@ -188,7 +208,7 @@ namespace InteractiveBrokers
             decimal totalCostDKK = 0;
             decimal totalValue = 0;
 
-            Console.WriteLine("================================ TotalCost ==== TotalCost ==== Value ===================");
+            Console.WriteLine("================================ TotalCost ==== TotalCost ==== Value ===================================");
             foreach (Position position in positions.OrderBy(p => p.symbol))
             {
                 Console.WriteLine(position);
@@ -222,6 +242,7 @@ namespace InteractiveBrokers
         public decimal tradePrice;
         public decimal proceeds; // = quantity * tradePrice
         public decimal commission;
+        public string subCategory; // "ETF", "COMMON", "ADR"
 
         static public Trade Parse(string line)
         {
@@ -237,6 +258,7 @@ namespace InteractiveBrokers
             trade.tradePrice = Utils.ParseDecimal(elements[5]);
             trade.proceeds = Utils.ParseDecimal(elements[6]);
             trade.commission = Utils.ParseDecimal(elements[7]);
+            trade.subCategory = Utils.Trim(elements[8]);
 
             return trade;
         }
@@ -301,7 +323,6 @@ namespace InteractiveBrokers
         public string dateTime;
         public string type; // "Withholding Tax", "Dividends", "Payment In Lieu Of Dividends", "Deposits/Withdrawals", "Broker Interest Received"
         public decimal amount;
-        public string currency;
         public string description;
 
         static public CashTransaction Parse(string line)
@@ -315,8 +336,7 @@ namespace InteractiveBrokers
             cashTransaction.dateTime = Utils.Trim(elements[2]);
             cashTransaction.type = Utils.Trim(elements[3]);
             cashTransaction.amount = Utils.ParseDecimal(elements[4]);
-            cashTransaction.currency = Utils.Trim(elements[5]);
-            cashTransaction.description = Utils.Trim(elements[6]);
+            cashTransaction.description = Utils.Trim(elements[5]);
 
             return cashTransaction;
         }
@@ -454,6 +474,7 @@ namespace InteractiveBrokers
             }
 
             // IBKR Activity Report section headers
+            const string AccountInformationSectionHeader    = "\"ClientAccountID\",\"CurrencyPrimary\",\"DateOpened\"";
             const string ChangeInNAVSectionHeader           = "\"FromDate\",\"ToDate\",\"StartingValue\",\"Mtm\",\"DepositsWithdrawals\",\"GrantActivity\",\"Dividends\",\"WithholdingTax\",\"Interest\",\"Commissions\",\"Realized\",\"EndingValue\",\"TWR\"";
             const string RealizedPerfInBaseSectionHeader    = "\"Symbol\",\"ISIN\",\"TotalRealizedPnl\"";
             const string CashReportSectionHeader            = "\"FromDate\",\"ToDate\",\"StartingCash\",\"NetTradesSales\",\"NetTradesPurchases\",\"EndingCash\"";
@@ -461,11 +482,12 @@ namespace InteractiveBrokers
             const string TradesSectionHeader                = "\"Symbol\",\"ISIN\",\"DateTime\",\"Buy/Sell\",\"Quantity\",\"TradePrice\",\"Proceeds\",\"IBCommission\"";
             const string CorporateActionsSectionHeader      = "\"Symbol\",\"ISIN\",\"Date/Time\",\"Type\",\"Description\",\"Quantity\"";
             const string GrantActivityHeader                = "\"Symbol\",\"ISIN\",\"VestingDate\",\"Quantity\",\"Price\",\"Value\"";
-            const string CashTransactionsSectionHeader      = "\"Symbol\",\"ISIN\",\"Date/Time\",\"Type\",\"Amount\",\"CurrencyPrimary\",\"Description\"";
+            const string CashTransactionsSectionHeader      = "\"Symbol\",\"ISIN\",\"Date/Time\",\"Type\",\"Amount\",\"Description\"";
             const string TransfersSectionHeader             = "\"Symbol\",\"ISIN\",\"DateTime\",\"Type\",\"Quantity\",\"Direction\",\"CostBasis\",\"TransferPrice\",\"Description\"";
 
             string[] lines = File.ReadAllLines(filePath);
 
+            int accountInformationSectionIndex  = -1;
             int changeInNAVSectionIndex         = -1;
             int realizedPerfInBaseSectionIndex  = -1;
             int cashReportSectionIndex          = -1;
@@ -478,6 +500,7 @@ namespace InteractiveBrokers
 
             for (int i = 0; i < lines.Length; i++)
             {
+                if (lines[i].IndexOf(AccountInformationSectionHeader) == 0) accountInformationSectionIndex = i;
                 if (lines[i].IndexOf(ChangeInNAVSectionHeader) == 0)        changeInNAVSectionIndex = i;
                 if (lines[i].IndexOf(RealizedPerfInBaseSectionHeader) == 0) realizedPerfInBaseSectionIndex = i;
                 if (lines[i].IndexOf(CashReportSectionHeader) == 0)         cashReportSectionIndex = i;
@@ -489,7 +512,8 @@ namespace InteractiveBrokers
                 if (lines[i].IndexOf(TransfersSectionHeader) == 0)          transfersSectionIndex = i;
             }
 
-            Precondition.ASSERT(changeInNAVSectionIndex == 0);
+            Precondition.ASSERT(accountInformationSectionIndex == 0);
+            Precondition.ASSERT(changeInNAVSectionIndex > accountInformationSectionIndex);
             Precondition.ASSERT(realizedPerfInBaseSectionIndex > changeInNAVSectionIndex);
             Precondition.ASSERT(cashReportSectionIndex > realizedPerfInBaseSectionIndex);
             Precondition.ASSERT(positionsSectionIndex > cashReportSectionIndex);
@@ -499,6 +523,7 @@ namespace InteractiveBrokers
             Precondition.ASSERT(cashTransactionsSectionIndex > grantActivitySectionIndex);
             Precondition.ASSERT(transfersSectionIndex > cashTransactionsSectionIndex);
 
+            var accountInformation = AccountInformation.Parse(lines[accountInformationSectionIndex + 1]);
             var changeInNAV = ChangeInNAV.Parse(lines[changeInNAVSectionIndex+1]);
 
             var realizedGainLosses = new List<RealizedGainLoss>();

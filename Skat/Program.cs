@@ -56,16 +56,16 @@ namespace LedgerToTax
             var fxRates = FxRates.Import2(Depot + "nationalbanken_2010-2026-10-08_USD.csv");
             
             // 2023
-            //var startPeriodPositions = ActivityReport.ExtractPositions(Depot + "Schwab_2022.csv"); // include manually the positions from other accounts (Schwab, SAXO)
-            //var currentActivityReport = ActivityReport.Import(Depot + "IBKR_2023.csv");
+            var startPeriodPositions = ActivityReport.ExtractPositions(Depot + "Schwab_2022.csv"); // include manually the positions from other accounts (Schwab, SAXO)
+            var currentActivityReport = ActivityReport.Import(Depot + "IBKR_2023.csv");
 
             // 2024
             //var startPeriodPositions = ActivityReport.ExtractPositions(Depot + "IBKR_2023.csv");
             //var currentActivityReport = ActivityReport.Import(Depot + "IBKR_2024.csv");
 
             // 2025
-            var startPeriodPositions = ActivityReport.ExtractPositions(Depot + "IBKR_2024.csv");
-            var currentActivityReport = ActivityReport.Import(Depot + "IBKR_2025.csv");
+            //var startPeriodPositions = ActivityReport.ExtractPositions(Depot + "IBKR_2024.csv");
+            //var currentActivityReport = ActivityReport.Import(Depot + "IBKR_2025.csv");
 
             Console.WriteLine();
             Console.WriteLine("Start Period Positions (from multiple accounts)");
@@ -183,27 +183,31 @@ namespace LedgerToTax
 
   
             Console.WriteLine();
-            Console.WriteLine("PERIOD: {0} / {1}         CALCULATED     CALCULATED      IBKR DATA    CHECK", currentActivityReport.changeInNAV.fromDate, currentActivityReport.changeInNAV.toDate);
-            Console.WriteLine("==========================================================================================");
-            Console.WriteLine("totalInterest        (Rubrik 431) : {0} {1} {2}    {3}", totalInterestDKK, totalInterestUSD, changeInNAVInterestUSD, Verify(totalInterestUSD, changeInNAVInterestUSD));
-            Console.WriteLine("totalInterestExpense (Rubrik 432) : {0} {1} {2}", totalInterestExpenseDKK, totalInterestExpenseUSD, NotAvailable);
-            Console.WriteLine("totalDividends       (Rubrik 452) : {0} {1} {2}    {3}", totalDividendsDKK, totalDividendsUSD, changeInNAVDividendsUSD, Verify(totalDividendsUSD, changeInNAVDividendsUSD));
-            Console.WriteLine("totalGainLoss        (Rubrik 454) : {0} {1} {2}    {3} (*)", totalGainLossDKK, totalGainLossUSD, totalRealizedGainLossUSD, Verify(totalGainLossUSD, totalRealizedGainLossUSD));
-            Console.WriteLine("totalWithholdingTax  (Rubrik 496) : {0} {1} {2}    {3}", totalWithholdingTaxDKK, totalWithholdingTaxUSD, changeInNAVWithholdingTaxUSD, Verify(totalWithholdingTaxUSD, changeInNAVWithholdingTaxUSD));
-            Console.WriteLine("totalCommissions                  : {0} {1} {2}    {3}", totalCommissionsDKK, totalCommissionsUSD, changeInNAVCommissionsUSD, Verify(totalCommissionsUSD, changeInNAVCommissionsUSD));
-            Console.WriteLine("yearEndPorfolioValue (Rubrik 490) : {0} {1} {2}    {3} (*)", yearEndPorfolioValueDKK, yearEndPorfolioValueUSD, stocksValueApproximationUSD, Verify(yearEndPorfolioValueUSD, stocksValueApproximationUSD));
-            Console.WriteLine("yearEndCash          (Rubrik 492) : {0} {1} {2}", yearEndCashDKK, NotAvailable, yearEndCashUSD);
-            Console.WriteLine("netFXGainLossFIFO    (Rubrik 434) : ");
-            Console.WriteLine("totalDepositsWithdrawals          : {0} {1} {2}    {3}", totalDepositsWithdrawalsDKK, totalDepositsWithdrawalsUSD, changeInNAVDepositsWithdrawalsUSD, Verify(totalDepositsWithdrawalsUSD, changeInNAVDepositsWithdrawalsUSD));
-            Console.WriteLine("startingValue                     : {0} {1} {2}    (*)", NotAvailable, NotAvailable, changeInNAVStartingValueUSD);
-            Console.WriteLine("endingValue                       : {0} {1} {2}    (*)", NotAvailable, NotAvailable, changeInNAVEndingValueUSD);
+            Console.WriteLine("PERIOD: {0} / {1}         CALCULATED (Average-Cost)    IBKR (FIFO)    RECONCILIATION", currentActivityReport.changeInNAV.fromDate, currentActivityReport.changeInNAV.toDate);
+            Console.WriteLine("==================================================================================================");
+            Console.WriteLine("Interest             (Rubrik 431) : {0} {1} {2}    {3}", totalInterestDKK, totalInterestUSD, changeInNAVInterestUSD, Verify(totalInterestUSD, changeInNAVInterestUSD));
+            Console.WriteLine("InterestExpense      (Rubrik 432) : {0} {1} {2}", totalInterestExpenseDKK, totalInterestExpenseUSD, NotAvailable);
+            Console.WriteLine("Dividends            (Rubrik 452) : {0} {1} {2}    {3}", totalDividendsDKK, totalDividendsUSD, changeInNAVDividendsUSD, Verify(totalDividendsUSD, changeInNAVDividendsUSD));
+            Console.WriteLine("GainLoss             (Rubrik 454) : {0} {1} {2}    {3} (*)", totalGainLossDKK, totalGainLossUSD, totalRealizedGainLossUSD, Verify(totalGainLossUSD, totalRealizedGainLossUSD));
+            Console.WriteLine("WithholdingTax       (Rubrik 496) : {0} {1} {2}    {3}", totalWithholdingTaxDKK, totalWithholdingTaxUSD, changeInNAVWithholdingTaxUSD, Verify(totalWithholdingTaxUSD, changeInNAVWithholdingTaxUSD));
+            Console.WriteLine("Commissions                       : {0} {1} {2}    {3}", totalCommissionsDKK, totalCommissionsUSD, changeInNAVCommissionsUSD, Verify(totalCommissionsUSD, changeInNAVCommissionsUSD));
+            Console.WriteLine("PorfolioValue        (Rubrik 490) : {0} {1} {2}    {3} (*)", yearEndPorfolioValueDKK, yearEndPorfolioValueUSD, stocksValueApproximationUSD, Verify(yearEndPorfolioValueUSD, stocksValueApproximationUSD));
+            Console.WriteLine("YearEndCash          (Rubrik 492) : {0} {1} {2}", yearEndCashDKK, NotAvailable, yearEndCashUSD);
+            Console.WriteLine("NetFXGainLossFIFO    (Rubrik 434) : ");
+            Console.WriteLine("DepositsWithdrawals               : {0} {1} {2}    {3}", totalDepositsWithdrawalsDKK, totalDepositsWithdrawalsUSD, changeInNAVDepositsWithdrawalsUSD, Verify(totalDepositsWithdrawalsUSD, changeInNAVDepositsWithdrawalsUSD));
+            Console.WriteLine("TotalNetDeposits ('Principal')    : ");
+            Console.WriteLine("PeriodStartingValue               : {0} {1} {2}    (*)", NotAvailable, NotAvailable, changeInNAVStartingValueUSD);
+            Console.WriteLine("PeriodEndingValue                 : {0} {1} {2}    (*)", NotAvailable, NotAvailable, changeInNAVEndingValueUSD);            
+            Console.WriteLine("PrincipalOverPeriodEndingValue    : ");
             Console.WriteLine("timeWeightedReturn (TWR)          : {0} {1} {2}    (*)", NotAvailable, NotAvailable, changeInNAVTimeWeightedReturnUSD);
+            
+            
 
             Console.WriteLine();
             Console.WriteLine("(*) This figure may account for positions that IBKR doesn't know or unvested grants.");
 
             Console.WriteLine();
-            Console.WriteLine("End Period Positions (CALCULATED)");
+            Console.WriteLine("End Period Positions (CALCULATED with Average-Cost)");
             taxReport.WritePositions();
 
             Console.WriteLine();
@@ -214,7 +218,7 @@ namespace LedgerToTax
             Console.WriteLine("   because it is going to be the 'previous report' for the next activity period calculation.");
 
             Console.WriteLine();
-            Console.WriteLine("End Period Positions (IBKR DATA)");
+            Console.WriteLine("End Period Positions (IBKR REPORT)");
             currentActivityReport.WriteOpenPositions();
 
             Console.WriteLine();

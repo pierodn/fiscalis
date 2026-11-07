@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -214,9 +214,9 @@ namespace EventProcessor
             }
 
             events = events
-                .OrderBy(e => e.dateTime.Substring(0, 10))      // Group by Day first
+                .OrderBy(e => !string.IsNullOrEmpty(e.dateTime) && e.dateTime.Length >= 10 ? e.dateTime.Substring(0, 10) : (e.dateTime ?? ""))      // Group by Day first
                 .ThenBy(e => e.type == EventType.Split ? 0 : 1) // Splits take effect before market opens
-                .ThenBy(e => e.dateTime)
+                .ThenBy(e => e.dateTime ?? "")
                 .ThenBy(e => e.quantity > 0 ? 0 : 1)            // acquisitions first at the same timestamp
                 .ToList();
 
@@ -249,12 +249,11 @@ namespace EventProcessor
         {
             Precondition.ASSERT(transfer.quantity != 0);
             // TODO this can be verified in 2026
-            Precondition.ASSERT((transfer.type == "IN") && (transfer.quantity > 0) 
+            string dir = (transfer.direction ?? transfer.type ?? "").Trim().ToUpperInvariant();
+            Precondition.ASSERT((dir == "IN" && transfer.quantity > 0) 
                             || (transfer.type == "OUT") && (transfer.quantity < 0));
 
-            decimal? dailyRateFound = fxRates.GetRate(transfer.dateTime);
-            Precondition.ASSERT(dailyRateFound.HasValue);
-            decimal dailyRate = dailyRateFound.Value;
+            decimal dailyRate = fxRates.GetRate(transfer.dateTime);
 
             return new Event(
                 transfer.symbol,
@@ -537,12 +536,12 @@ namespace EventProcessor
                             Precondition.ASSERT(soldQuantity > 0);
                             Precondition.ASSERT(position.totalCostUSD >= 0);
                             Precondition.ASSERT(position.totalCostDKK >= 0);
+                            Precondition.ASSERT(soldQuantity <= position.quantity + Epsilon);
 
-                            // 1. Detect if this sale is effectively closing the full position (within rounding tolerance)
-                            bool closesPosition = (position.quantity <= soldQuantity) || Math.Abs(position.quantity - soldQuantity) < Epsilon;
+                            bool closesPosition = Math.Abs(position.quantity - soldQuantity) < Epsilon;
                             if (closesPosition)
                             {
-                                // Snap soldQuantity to exact position quantity to absorb any CSV rounding dust
+                                // Absorb only a rounding-sized difference.
                                 soldQuantity = position.quantity;
                             }
                             else
@@ -553,7 +552,7 @@ namespace EventProcessor
                             decimal averageCostUSD = position.totalCostUSD / position.quantity;
                             decimal averageCostDKK = position.totalCostDKK / position.quantity;
 
-                            // 2. If closing, allocate the entire remaining pool to avoid residual cents
+                            // If closing, allocate the entire remaining pool to avoid residual cents
                             decimal costOfSoldUSD = closesPosition ? position.totalCostUSD : averageCostUSD * soldQuantity;
                             decimal costOfSoldDKK = closesPosition ? position.totalCostDKK : averageCostDKK * soldQuantity;
 
