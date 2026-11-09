@@ -129,6 +129,7 @@ namespace EventProcessor
     {
         public string symbol;
         public string isin;
+        public string subCategory;
         public string dateTime;
         public decimal dailyRate;
         public EventType type;
@@ -154,9 +155,10 @@ namespace EventProcessor
         private Event(
             string symbol,
             string isin,
+            string subCategory,
             string dateTime,
             decimal dailyRate, // to reportingCurrency
-            // TODO string broker // IBKR, SAXO
+            // TODO string broker // IBKR, SAXO            
             EventType type,
             decimal quantity,
             decimal price,      // TODO rename priceUSD ?
@@ -167,6 +169,7 @@ namespace EventProcessor
         {
             this.symbol = symbol;
             this.isin = isin;
+            this.subCategory = subCategory;
             this.dateTime = dateTime;
             this.dailyRate = dailyRate;
             this.type = type;
@@ -234,6 +237,7 @@ namespace EventProcessor
             return new Event(
                 trade.symbol,
                 trade.isin,
+                trade.subCategory,
                 trade.dateTime,
                 dailyRate,
                 EventType.Trade, 
@@ -257,6 +261,7 @@ namespace EventProcessor
             return new Event(
                 transfer.symbol,
                 transfer.isin,
+                "",
                 transfer.dateTime,
                 dailyRate,
                 EventType.Transfer,
@@ -454,6 +459,16 @@ namespace EventProcessor
                 if (WriteEventSequence)
                 {
                     Console.WriteLine(evt);
+                }
+
+                if(evt.isin.StartsWith("DK"))
+                {
+                    throw new InvalidOperationException("This company should be processed separately for SKAT.");
+                }
+
+                if (!string.IsNullOrEmpty(evt.subCategory) && evt.subCategory.Contains("ETF"))
+                {
+                    throw new InvalidOperationException("ETFs should be processed separately for SKAT.");
                 }
 
                 if (evt.type == EventType.WithholdingTax)
