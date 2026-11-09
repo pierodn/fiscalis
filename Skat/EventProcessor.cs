@@ -214,9 +214,8 @@ namespace EventProcessor
             }
 
             events = events
-                .OrderBy(e => !string.IsNullOrEmpty(e.dateTime) && e.dateTime.Length >= 10 ? e.dateTime.Substring(0, 10) : (e.dateTime ?? ""))      // Group by Day first
+                .OrderBy(e => !string.IsNullOrEmpty(e.dateTime) && e.dateTime.Length >= 10 ? (e.dateTime ?? "") : (e.dateTime + ";000000") )      // Group by Day first
                 .ThenBy(e => e.type == EventType.Split ? 0 : 1) // Splits take effect before market opens
-                .ThenBy(e => e.dateTime ?? "")
                 .ThenBy(e => e.quantity > 0 ? 0 : 1)            // acquisitions first at the same timestamp
                 .ToList();
 

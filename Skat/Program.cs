@@ -56,12 +56,12 @@ namespace LedgerToTax
             var fxRates = FxRates.Import2(Depot + "nationalbanken_2010-2026-10-08_USD.csv");
             
             // 2023
-            var startPeriodPositions = ActivityReport.ExtractPositions(Depot + "Schwab_2022.csv"); // include manually the positions from other accounts (Schwab, SAXO)
-            var currentActivityReport = ActivityReport.Import(Depot + "IBKR_2023.csv");
+            //var startPeriodPositions = ActivityReport.ExtractPositions(Depot + "Schwab_2022.csv"); // include manually the positions from other accounts (Schwab, SAXO)
+            //var currentActivityReport = ActivityReport.Import(Depot + "IBKR_2023.csv");
 
             // 2024
-            //var startPeriodPositions = ActivityReport.ExtractPositions(Depot + "IBKR_2023.csv");
-            //var currentActivityReport = ActivityReport.Import(Depot + "IBKR_2024.csv");
+            var startPeriodPositions = ActivityReport.ExtractPositions(Depot + "IBKR_2023.csv");
+            var currentActivityReport = ActivityReport.Import(Depot + "IBKR_2024.csv");
 
             // 2025
             //var startPeriodPositions = ActivityReport.ExtractPositions(Depot + "IBKR_2024.csv");
