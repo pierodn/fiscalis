@@ -96,6 +96,7 @@ namespace InteractiveBrokers
         public string symbol;
         public string isin;
         public decimal totalRealizedPnl;
+        public string issuerCountryCode;
 
         static public RealizedGainLoss Parse(string line)
         {
@@ -105,6 +106,7 @@ namespace InteractiveBrokers
             realizedGainLoss.symbol = Utils.Trim(elements[0]);
             realizedGainLoss.isin = Utils.Trim(elements[1]);
             realizedGainLoss.totalRealizedPnl = Utils.ParseDecimal(elements[2]);
+            realizedGainLoss.issuerCountryCode = Utils.Trim(elements[3]);
 
             return realizedGainLoss;
         }
@@ -144,6 +146,7 @@ namespace InteractiveBrokers
         public decimal totalCostUSD; // This is initially coming from the OpenPositions of the previousActivityReport (if any).
         public decimal totalCostDKK; // This should somehow be inserted manually because it depends on the DKK-USD rates, which are generally unknown.
         public decimal positionValue;
+        public string issuerCountryCode;
 
         // Returns ISIN if available; otherwise falls back to Symbol
         public string Key
@@ -173,26 +176,8 @@ namespace InteractiveBrokers
 
             position.totalCostUSD = costBasisPrice * position.quantity;
             position.positionValue = Utils.ParseDecimal(elements[4]); // This is the end-year position value today (endYearPrice * quantity) 
-
-            bool isTotalCostDKKPresent = elements.Length > 5;
-            if (isTotalCostDKKPresent)
-            {
-                position.totalCostDKK = Utils.ParseDecimal(elements[5]); 
-            } 
-            else if (asktotalCostDKK)
-            {
-                Console.Write("==> Enter the totalCostDkk for the {0} shares of {1}: ", position.quantity, position.symbol);
-                string input = Console.ReadLine();
-                if (input.Length > 0)
-                {
-                    Boolean success = decimal.TryParse(input, out position.totalCostDKK);
-                    if (!success)
-                    {
-                        throw new InvalidOperationException("Error parsing decimal");
-
-                    }
-                }
-            }
+            position.totalCostDKK = Utils.ParseDecimal(elements[5]); // This is added manually
+            position.issuerCountryCode = Utils.Trim(elements[6]); 
 
             return position;
         }
@@ -227,8 +212,9 @@ namespace InteractiveBrokers
             string totalCostUSD = Utils.FormatUSD(this.totalCostUSD);
             string totalCostDKK = Utils.FormatDKK(this.totalCostDKK);
             string positionValueUSD = Utils.FormatUSD(this.positionValue);
+            string country = "(" + issuerCountryCode + ")";
 
-            return string.Format("{0} {1} {2} {3} {4} {5}", isin, symbol, quantity, totalCostUSD, totalCostDKK, positionValueUSD);
+            return string.Format("{0} {1} {2} {3} {4} {5} {6}", isin, symbol, quantity, totalCostUSD, totalCostDKK, positionValueUSD, country);
         }
     }
 
@@ -243,6 +229,7 @@ namespace InteractiveBrokers
         public decimal proceeds; // = quantity * tradePrice
         public decimal commission;
         public string subCategory; // "ETF", "COMMON", "ADR"
+        public string issuerCountryCode;
 
         static public Trade Parse(string line)
         {
@@ -259,6 +246,8 @@ namespace InteractiveBrokers
             trade.proceeds = Utils.ParseDecimal(elements[6]);
             trade.commission = Utils.ParseDecimal(elements[7]);
             trade.subCategory = Utils.Trim(elements[8]);
+            trade.issuerCountryCode = Utils.Trim(elements[9]);
+
 
             return trade;
         }
@@ -272,6 +261,7 @@ namespace InteractiveBrokers
         public string type; // "FS" stands for SPLIT. See description
         public string description;
         public decimal quantity;
+        public string issuerCountryCode;
 
         static public CorporateAction Parse(string line)
         {
@@ -285,6 +275,7 @@ namespace InteractiveBrokers
             corporateAction.type = Utils.Trim(elements[3]);
             corporateAction.description = Utils.Trim(elements[4]);
             corporateAction.quantity = Utils.ParseDecimal(elements[5]);
+            corporateAction.issuerCountryCode = Utils.Trim(elements[6]);
 
             return corporateAction;
         }
@@ -298,6 +289,7 @@ namespace InteractiveBrokers
         public decimal quantity;
         public decimal price;
         public decimal value;
+        public string issuerCountryCode;
 
         static public GrantActivity Parse(string line)
         {
@@ -311,6 +303,7 @@ namespace InteractiveBrokers
             grantActivity.quantity = Utils.ParseDecimal(elements[3]);
             grantActivity.price = Utils.ParseDecimal(elements[4]);
             grantActivity.value = Utils.ParseDecimal(elements[5]);
+            grantActivity.issuerCountryCode = Utils.Trim(elements[6]);
 
             return grantActivity;
         }
@@ -324,6 +317,7 @@ namespace InteractiveBrokers
         public string type; // "Withholding Tax", "Dividends", "Payment In Lieu Of Dividends", "Deposits/Withdrawals", "Broker Interest Received"
         public decimal amount;
         public string description;
+        public string issuerCountryCode;
 
         static public CashTransaction Parse(string line)
         {
@@ -337,6 +331,7 @@ namespace InteractiveBrokers
             cashTransaction.type = Utils.Trim(elements[3]);
             cashTransaction.amount = Utils.ParseDecimal(elements[4]);
             cashTransaction.description = Utils.Trim(elements[5]);
+            cashTransaction.issuerCountryCode = Utils.Trim(elements[6]);
 
             return cashTransaction;
         }
@@ -353,6 +348,7 @@ namespace InteractiveBrokers
         public decimal costBasis;
         public decimal transferPrice;
         public string description; // TEMP
+        public string issuerCountryCode;
 
         static public Transfer Parse(string line)
         {
@@ -369,6 +365,7 @@ namespace InteractiveBrokers
             transfer.costBasis = Utils.ParseDecimal(elements[6]);
             transfer.transferPrice = Utils.ParseDecimal(elements[7]);
             transfer.description = Utils.Trim(elements[8]); // TEMP
+            transfer.issuerCountryCode = Utils.Trim(elements[9]);
 
             return transfer;
         }
@@ -527,7 +524,7 @@ namespace InteractiveBrokers
             var changeInNAV = ChangeInNAV.Parse(lines[changeInNAVSectionIndex+1]);
 
             var realizedGainLosses = new List<RealizedGainLoss>();
-            for (int i = realizedPerfInBaseSectionIndex + 1; i < cashReportSectionIndex; i++)
+            for (int i = realizedPerfInBaseSectionIndex + 1; i < cashReportSectionIndex - 1; i++) // ?
             {
                 realizedGainLosses.Add(RealizedGainLoss.Parse(lines[i]));
             }

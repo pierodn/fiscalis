@@ -43,6 +43,20 @@ namespace EventProcessor
         }
     }
 
+    public class ReportingFigures
+    {
+        public decimal totalInterest;            // Rubrik 431: interest (positive)
+        public decimal totalInterestExpense;     // Rubrik 432: interest (negative) paid because of leverage
+        public decimal totalDividends;           // Rubrik 452: Foreign Dividends - Gross
+        public decimal totalGainLoss;            // Rubrik 454: Foreign Capital Gains/Losses (calculated in DKK)
+        public decimal totalWithholdingTax;      // Rubrik 496: Foreign Withholding Tax Paid
+        public decimal totalCommissions;         //
+        public decimal yearEndPorfolioValue;     // Rubrik 490: Market value of all shares at the End-Year (in DKK)
+        public decimal yearEndCash;              // Rubrik 492: Uninvested cash converted from USD to DKK (end-year rate)
+        public decimal netFXGainLossFIFO;           // Rubrik 434: FIFO GainLoss when withdrawing cash (if greater than +/-2000 DKK).
+        public decimal totalDepositsWithdrawalsDKK; //
+    }
+
     public class TaxReport
     {
         // For me to verify against Activity Statement (Change in NAV)
@@ -67,7 +81,7 @@ namespace EventProcessor
         public decimal yearEndCashDKK;              // Rubrik 492: Uninvested cash converted from USD to DKK (end-year rate)
         public decimal netFXGainLossFIFO;           // Rubrik 434: FIFO GainLoss when withdrawing cash (if greater than +/-2000 DKK).
         public decimal totalDepositsWithdrawalsDKK; //
-        // TODO Rubrik 493. If you owe IBKR money at year end
+        
 
         // StartPeriodPositions and EndPeriodPositions after the events
         public Dictionary<string, Position> positions = new Dictionary<string, Position>();
@@ -129,7 +143,8 @@ namespace EventProcessor
     {
         public string symbol;
         public string isin;
-        public string subCategory;
+        public string issuerCountryCode;
+        public string subCategory; // TODO turn into enum
         public string dateTime;
         public decimal dailyRate;
         public EventType type;
@@ -155,6 +170,7 @@ namespace EventProcessor
         private Event(
             string symbol,
             string isin,
+            string issuerCountryCode,
             string subCategory,
             string dateTime,
             decimal dailyRate, // to reportingCurrency
@@ -169,6 +185,7 @@ namespace EventProcessor
         {
             this.symbol = symbol;
             this.isin = isin;
+            this.issuerCountryCode = issuerCountryCode;
             this.subCategory = subCategory;
             this.dateTime = dateTime;
             this.dailyRate = dailyRate;
@@ -237,6 +254,7 @@ namespace EventProcessor
             return new Event(
                 trade.symbol,
                 trade.isin,
+                trade.issuerCountryCode,
                 trade.subCategory,
                 trade.dateTime,
                 dailyRate,
@@ -261,7 +279,8 @@ namespace EventProcessor
             return new Event(
                 transfer.symbol,
                 transfer.isin,
-                "",
+                transfer.issuerCountryCode,
+                "", // TODO bring subCategory into Transfer
                 transfer.dateTime,
                 dailyRate,
                 EventType.Transfer,
@@ -281,6 +300,7 @@ namespace EventProcessor
             Event evt = new Event();
             evt.symbol = corporateAction.symbol;
             evt.isin = corporateAction.isin;
+            evt.issuerCountryCode = corporateAction.issuerCountryCode;
             evt.dateTime = corporateAction.dateTime;
             evt.dailyRate = dailyRate;
 
@@ -327,6 +347,7 @@ namespace EventProcessor
             Event evt = new Event();
             evt.symbol = grantActivity.symbol;
             evt.isin = grantActivity.isin;
+            evt.issuerCountryCode = grantActivity.issuerCountryCode;
             evt.dateTime = grantActivity.vestingDate;
             evt.dailyRate = dailyRate;
 
@@ -346,6 +367,7 @@ namespace EventProcessor
             Event evt = new Event();
             evt.symbol = cashTransaction.symbol;
             evt.isin = cashTransaction.isin;
+            evt.issuerCountryCode = cashTransaction.issuerCountryCode;
             evt.dateTime = cashTransaction.dateTime;
             evt.dailyRate = dailyRate;
 
@@ -388,6 +410,7 @@ namespace EventProcessor
             string dateColumn = dateTime;
             string symbolColumn = symbol;
             string isinColumn = isin;
+            string issuerCountryCodeColumn = issuerCountryCode ?? string.Empty;
             string eventTypeColumn = "";
             string quantityColumn = "";
             string priceColumn = "";
@@ -433,7 +456,8 @@ namespace EventProcessor
 
             string line = 
                 dateColumn.PadRight(20) +
-                isinColumn.PadRight(16) +
+                isinColumn.PadRight(14) +
+                issuerCountryCodeColumn.PadRight(4) + 
                 symbolColumn.PadRight(9) +
                 eventTypeColumn.PadRight(6) +
                 quantityColumn.PadRight(10) + 
@@ -461,14 +485,16 @@ namespace EventProcessor
                     Console.WriteLine(evt);
                 }
 
-                if(evt.isin.StartsWith("DK"))
+                //if(evt.isin.StartsWith("DK"))
+                bool isDomestic = evt.issuerCountryCode != null && evt.issuerCountryCode.StartsWith("DK");
+                if (isDomestic)
                 {
-                    throw new InvalidOperationException("This company should be processed separately for SKAT.");
+                    //throw new InvalidOperationException("This company should be processed separately for SKAT.");
                 }
 
                 if (!string.IsNullOrEmpty(evt.subCategory) && evt.subCategory.Contains("ETF"))
                 {
-                    throw new InvalidOperationException("ETFs should be processed separately for SKAT.");
+                    //throw new InvalidOperationException("ETFs should be processed separately for SKAT.");
                 }
 
                 if (evt.type == EventType.WithholdingTax)
@@ -523,8 +549,15 @@ namespace EventProcessor
                         position = new Position();
                         position.symbol = evt.symbol;
                         position.isin = evt.isin;
+                        position.issuerCountryCode = evt.issuerCountryCode;
                         report.positions[key] = position;
                     }
+                }
+
+                // Sometimes the event doesn't carry the issuerCountryCode - Bug from IBKR Flex Query
+                if (string.IsNullOrEmpty(position.issuerCountryCode))
+                {
+                    position.issuerCountryCode = evt.issuerCountryCode;
                 }
 
                 switch (evt.type)
